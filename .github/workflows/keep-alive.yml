@@ -1,0 +1,26 @@
+name: Supabase Keep-Alive
+
+on:
+  schedule:
+    - cron: '15 2 */3 * *'
+  workflow_dispatch:
+
+jobs:
+  ping-keepalive:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Ping Cloudflare Worker Keep-Alive Endpoint
+        run: |
+          echo "Pinging Cloudflare Worker /api/keepalive..."
+          HTTP_STATUS=$(curl -s -o /tmp/keepalive_res.json -w "%{http_code}" "https://timeflow-planner.h1s.workers.dev/api/keepalive")
+          cat /tmp/keepalive_res.json || true
+          echo ""
+          echo "HTTP Status: $HTTP_STATUS"
+          if [ "$HTTP_STATUS" -ge 200 ] && [ "$HTTP_STATUS" -lt 300 ]; then
+            echo "Worker Keep-Alive succeeded."
+            exit 0
+          fi
+          echo "Worker ping returned $HTTP_STATUS, falling back to direct Supabase REST ping..."
+          curl -f -s "https://buwyexbkjtnubjjzjgxa.supabase.co/rest/v1/escape_rooms?select=code&limit=1" \
+            -H "apikey: sb_publishable_9UEw3qlP8N6mss-ECjYrSA_lVs33DzY" \
+            -H "Authorization: Bearer sb_publishable_9UEw3qlP8N6mss-ECjYrSA_lVs33DzY"

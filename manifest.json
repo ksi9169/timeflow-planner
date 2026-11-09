@@ -1,0 +1,28 @@
+{
+  "name": "타임플로우 일정 · 루틴 · 타임트래커",
+  "short_name": "타임플로우",
+  "description": "한눈에 파악하는 일정 관리, 루티너리 스타일 타이머, 타임트래커 분석 및 월간 목표 설계 웹앱",
+  "start_url": "./index.html",
+  "display": "standalone",
+  "background_color": "#0F172A",
+  "theme_color": "#4F46E5",
+  "lang": "ko",
+  "icons": [
+    {
+      "src": "favicon.svg",
+      "sizes": "any",
+      "type": "image/svg+xml",
+      "purpose": "any maskable"
+    },
+    {
+      "src": "icon-192.png",
+      "sizes": "192x192",
+      "type": "image/png"
+    },
+    {
+      "src": "icon-512.png",
+      "sizes": "512x512",
+      "type": "image/png"
+    }
+  ]
+}
