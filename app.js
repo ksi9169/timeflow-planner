@@ -1289,6 +1289,296 @@
     });
   }
 
+  // -------------------- 타임블록 드래그 앤 드롭 & 소요 시간 리사이즈 엔진 --------------------
+  let draggedTimelineItem = null;
+  let lastDragOrResizeAt = 0;
+
+  function isJustDraggedOrResized() {
+    return Date.now() - lastDragOrResizeAt < 260;
+  }
+
+  function calcBlockMinHeightPx(durMins) {
+    return Math.max(46, Math.min(180, Math.round(durMins * 0.78)));
+  }
+
+  function adjustItemDurationByStep(item, deltaMins) {
+    if (!item || !item.startTime || !item.endTime) return;
+    const startMins = timeToMinutes(item.startTime);
+    const curDur = durationMinutes(item.startTime, item.endTime);
+    const nextDur = Math.max(15, Math.min(23 * 60 + 59 - startMins, curDur + deltaMins));
+    if (nextDur === curDur) return;
+    item.endTime = minutesToTime(startMins + nextDur);
+    saveState();
+    renderAll();
+    showToast(`'${item.title}' 소요 시간이 ${item.startTime}~${item.endTime} · ${formatDurationKo(nextDur)}으로 변경되었습니다.`);
+  }
+
+  function makeItemDraggable(el, itemType, item, sourceDate) {
+    if (!el || !item) return;
+    el.draggable = true;
+    el.addEventListener('dragstart', e => {
+      if (el.classList.contains('is-resizing')) {
+        e.preventDefault();
+        return;
+      }
+      draggedTimelineItem = {
+        itemType,
+        itemId: item.id,
+        sourceDate: sourceDate || selectedDate
+      };
+      el.classList.add('is-dragging');
+      if (e.dataTransfer) {
+        e.dataTransfer.effectAllowed = 'move';
+        try {
+          e.dataTransfer.setData('text/plain', JSON.stringify(draggedTimelineItem));
+        } catch (_) {}
+      }
+    });
+    el.addEventListener('dragend', () => {
+      lastDragOrResizeAt = Date.now();
+      el.classList.remove('is-dragging');
+      document.querySelectorAll('.drag-over-slot').forEach(s => s.classList.remove('drag-over-slot'));
+    });
+  }
+
+  function makeSlotDroppable(slotEl, targetOptions) {
+    if (!slotEl) return;
+    slotEl.addEventListener('dragover', e => {
+      e.preventDefault();
+      if (e.dataTransfer) e.dataTransfer.dropEffect = 'move';
+      slotEl.classList.add('drag-over-slot');
+    });
+    slotEl.addEventListener('dragleave', e => {
+      if (!slotEl.contains(e.relatedTarget)) {
+        slotEl.classList.remove('drag-over-slot');
+      }
+    });
+    slotEl.addEventListener('drop', e => {
+      e.preventDefault();
+      e.stopPropagation();
+      slotEl.classList.remove('drag-over-slot');
+      let payload = draggedTimelineItem;
+      if (!payload && e.dataTransfer) {
+        try {
+          payload = JSON.parse(e.dataTransfer.getData('text/plain'));
+        } catch (_) {}
+      }
+      draggedTimelineItem = null;
+      lastDragOrResizeAt = Date.now();
+      if (payload) {
+        handleTimelineItemDrop(payload, targetOptions);
+      }
+    });
+  }
+
+  function handleTimelineItemDrop(payload, targetOptions) {
+    const { itemType, itemId } = payload;
+    const { targetType, targetDate, targetHour } = targetOptions;
+    const destDate = targetDate || selectedDate;
+
+    if (itemType === 'schedule') {
+      const sch = state.schedules.find(s => s.id === itemId);
+      if (!sch) return;
+      const origDur = durationMinutes(sch.startTime, sch.endTime);
+      const origMinuteOffset = timeToMinutes(sch.startTime) % 60;
+
+      if (targetType === 'actual') {
+        const startMins =
+          typeof targetHour === 'number'
+            ? Math.min(23 * 60 + 45, targetHour * 60 + origMinuteOffset)
+            : timeToMinutes(sch.startTime);
+        const endMins = Math.min(23 * 60 + 59, startMins + origDur);
+        const newStart = minutesToTime(startMins);
+        const newEnd = minutesToTime(endMins);
+
+        setItemCompletedOnDate(sch, destDate, true);
+        state.actualLogs.push({
+          id: uid('act'),
+          title: sch.title,
+          date: destDate,
+          startTime: newStart,
+          endTime: newEnd,
+          categoryId: sch.categoryId,
+          projectTag: cleanProjectTag(sch.projectTag)
+        });
+        saveState();
+        renderAll();
+        showToast(`'${sch.title}' 일정이 ${newStart}~${newEnd} 실제 진행 기록으로 반영되었습니다.`);
+        return;
+      }
+
+      let changed = false;
+      if (destDate && sch.date !== destDate) {
+        sch.date = destDate;
+        changed = true;
+      }
+      if (typeof targetHour === 'number') {
+        const nextStartMins = Math.min(23 * 60 + 45, targetHour * 60 + origMinuteOffset);
+        const nextEndMins = Math.min(23 * 60 + 59, nextStartMins + origDur);
+        const nextStart = minutesToTime(nextStartMins);
+        const nextEnd = minutesToTime(nextEndMins);
+        if (sch.startTime !== nextStart || sch.endTime !== nextEnd) {
+          sch.startTime = nextStart;
+          sch.endTime = nextEnd;
+          changed = true;
+        }
+      }
+      if (changed) {
+        saveState();
+        renderAll();
+        showToast(`'${sch.title}' 일정이 ${sch.date === selectedDate ? '' : sch.date + ' '}${sch.startTime}~${sch.endTime}으로 이동되었습니다.`);
+      }
+    } else if (itemType === 'actual') {
+      const act = state.actualLogs.find(a => a.id === itemId);
+      if (!act) return;
+      const origDur = durationMinutes(act.startTime, act.endTime);
+      const origMinuteOffset = timeToMinutes(act.startTime) % 60;
+
+      let changed = false;
+      if (destDate && act.date !== destDate) {
+        act.date = destDate;
+        changed = true;
+      }
+      if (typeof targetHour === 'number') {
+        const nextStartMins = Math.min(23 * 60 + 45, targetHour * 60 + origMinuteOffset);
+        const nextEndMins = Math.min(23 * 60 + 59, nextStartMins + origDur);
+        const nextStart = minutesToTime(nextStartMins);
+        const nextEnd = minutesToTime(nextEndMins);
+        if (act.startTime !== nextStart || act.endTime !== nextEnd) {
+          act.startTime = nextStart;
+          act.endTime = nextEnd;
+          changed = true;
+        }
+      }
+      if (changed) {
+        saveState();
+        renderAll();
+        showToast(`'${act.title}' 기록이 ${act.date === selectedDate ? '' : act.date + ' '}${act.startTime}~${act.endTime}으로 이동되었습니다.`);
+      }
+    } else if (itemType === 'todo') {
+      const todo = state.todos.find(t => t.id === itemId);
+      if (!todo) return;
+
+      if (typeof targetHour === 'number') {
+        const dur = Math.max(15, Number(todo.estimatedMinutes || 60));
+        const startMins = targetHour * 60;
+        const endMins = Math.min(23 * 60 + 59, startMins + dur);
+        const newStart = minutesToTime(startMins);
+        const newEnd = minutesToTime(endMins);
+
+        if (targetType === 'actual') {
+          state.actualLogs.push({
+            id: uid('act'),
+            title: todo.title,
+            date: destDate,
+            startTime: newStart,
+            endTime: newEnd,
+            categoryId: todo.categoryId,
+            projectTag: cleanProjectTag(todo.projectTag)
+          });
+          setItemCompletedOnDate(todo, destDate, true);
+          saveState();
+          renderAll();
+          showToast(`'${todo.title}' 할 일이 ${newStart}~${newEnd} 실제 진행 기록으로 등록되었습니다.`);
+        } else {
+          state.schedules.push({
+            id: uid('sch'),
+            title: todo.title,
+            date: destDate,
+            startTime: newStart,
+            endTime: newEnd,
+            categoryId: todo.categoryId,
+            projectTag: cleanProjectTag(todo.projectTag),
+            repeat: 'none',
+            completedDates: [],
+            alarm: true,
+            important: Boolean(todo.important),
+            completed: false
+          });
+          if (!todo.dueDate) todo.dueDate = destDate;
+          saveState();
+          renderAll();
+          showToast(`'${todo.title}' 할 일이 ${newStart}~${newEnd} 계획 일정으로 배치되었습니다.`);
+        }
+        return;
+      }
+
+      if (destDate && todo.dueDate !== destDate) {
+        todo.dueDate = destDate;
+        saveState();
+        renderAll();
+        showToast(`'${todo.title}' 마감 날짜가 ${destDate}로 변경되었습니다.`);
+      }
+    }
+  }
+
+  function attachDurationResizeHandle(blockEl, item, onPreviewUpdate) {
+    if (!blockEl || !item) return;
+    const handle = document.createElement('div');
+    handle.className = 'tb-resize-handle';
+    handle.title = '위아래로 드래그하여 소요 시간을 15분 단위로 조절합니다';
+
+    handle.addEventListener('click', e => {
+      e.stopPropagation();
+    });
+    handle.addEventListener('dragstart', e => {
+      e.preventDefault();
+      e.stopPropagation();
+    });
+
+    handle.addEventListener('pointerdown', e => {
+      e.stopPropagation();
+      e.preventDefault();
+      try {
+        handle.setPointerCapture(e.pointerId);
+      } catch (_) {}
+
+      const startY = e.clientY;
+      const startMins = timeToMinutes(item.startTime);
+      const origDur = durationMinutes(item.startTime, item.endTime);
+      let nextEndStr = item.endTime;
+      let nextDur = origDur;
+
+      blockEl.classList.add('is-resizing');
+      blockEl.draggable = false;
+
+      const onMove = ev => {
+        const deltaY = ev.clientY - startY;
+        const deltaMins = Math.round(deltaY / 12) * 15;
+        nextDur = Math.max(15, Math.min(23 * 60 + 59 - startMins, origDur + deltaMins));
+        nextEndStr = minutesToTime(startMins + nextDur);
+        if (typeof onPreviewUpdate === 'function') {
+          onPreviewUpdate(nextEndStr, nextDur);
+        }
+      };
+
+      const onUp = ev => {
+        try {
+          handle.releasePointerCapture(ev.pointerId);
+        } catch (_) {}
+        handle.removeEventListener('pointermove', onMove);
+        handle.removeEventListener('pointerup', onUp);
+        handle.removeEventListener('pointercancel', onUp);
+        blockEl.classList.remove('is-resizing');
+        blockEl.draggable = true;
+        lastDragOrResizeAt = Date.now();
+
+        if (nextEndStr !== item.endTime) {
+          item.endTime = nextEndStr;
+          saveState();
+          renderAll();
+          showToast(`'${item.title}' 소요 시간이 ${item.startTime}~${item.endTime} · ${formatDurationKo(nextDur)}으로 변경되었습니다.`);
+        }
+      };
+
+      handle.addEventListener('pointermove', onMove);
+      handle.addEventListener('pointerup', onUp);
+      handle.addEventListener('pointercancel', onUp);
+    });
+
+    blockEl.appendChild(handle);
+  }
+
   // -------------------- 할 일 및 프로젝트 태그 묶음 렌더링 --------------------
   function createTodoCardElement(todo) {
     const cat = getCategoryById(todo.categoryId);
@@ -1339,8 +1629,12 @@
     });
 
     card.querySelector('.todo-edit-btn').addEventListener('click', () => {
+      if (isJustDraggedOrResized()) return;
       openItemModalForEdit('todo', todo);
     });
+
+    makeItemDraggable(card, 'todo', todo, selectedDate);
+    card.title = '드래그하여 타임라인 시간대나 달력 날짜에 놓으면 일정으로 바로 배치됩니다';
 
     return card;
   }
@@ -1570,9 +1864,9 @@
 
       tlTitle.textContent = formatDateHeadingKo(selectedDate);
       if (dashTrackMode === 'both') {
-        tlSub.textContent = '좌측 열은 계획 일정, 우측 열은 실제 진행 시간입니다. 빈 칸을 누르면 바로 추가됩니다.';
+        tlSub.textContent = '블록을 드래그해 시간대를 이동하거나 하단 바를 끌어 소요 시간을 조절하세요.';
       } else if (dashTrackMode === 'plan') {
-        tlSub.textContent = '선택한 날짜의 계획 일정만 집중해서 봅니다. 빈 시간대를 눌러 일정을 추가하세요.';
+        tlSub.textContent = '선택한 날짜의 계획 일정만 집중해서 봅니다. 드래그로 시간 이동 및 길이 조절이 가능합니다.';
       } else {
         tlSub.textContent = '선택한 날짜에 실제로 진행하고 기록한 타임트래커 내역만 모아 봅니다.';
       }
@@ -1676,35 +1970,51 @@
       if (showPlan) {
         const planCol = document.createElement('div');
         planCol.className = 'dt-slot-cell';
+        planCol.dataset.slotType = 'plan';
+        planCol.dataset.hour = String(hour);
+        makeSlotDroppable(planCol, { targetType: 'schedule', targetDate: selectedDate, targetHour: hour });
+
         if (plansInHour.length === 0) {
-          planCol.innerHTML = `<span class="dt-empty-hint">+ ${hourStr} 계획 추가</span>`;
+          planCol.innerHTML = `<span class="dt-empty-hint">+ ${hourStr} 계획 추가 또는 드롭</span>`;
         } else {
           plansInHour.forEach(p => {
             const cat = getCategoryById(p.categoryId);
             const isPlanDone = isItemCompletedOnDate(p, selectedDate);
             const pTag = cleanProjectTag(p.projectTag);
             const repLabel = getRepeatLabelKo(p.repeat, p.date);
+            const dur = durationMinutes(p.startTime, p.endTime);
             const block = document.createElement('div');
             block.className = `timeline-block ${isPlanDone ? 'is-completed-block' : ''}`;
             block.style.background = `${cat.color}16`;
             block.style.borderLeftColor = cat.color;
+            block.style.minHeight = `${calcBlockMinHeightPx(dur)}px`;
             block.innerHTML = `
               <div class="tb-info">
                 <span class="tb-time" style="color:${cat.color};display:flex;align-items:center;gap:4px;flex-wrap:wrap;">
-                  <span>${p.startTime} ~ ${p.endTime} ${p.alarm ? '🔔' : ''} ${p.important ? '★ 중요' : ''}</span>
+                  <span class="tb-time-range-text">${p.startTime} ~ ${p.endTime} · ${dur}분 ${p.alarm ? '🔔' : ''} ${p.important ? '★ 중요' : ''}</span>
                   ${pTag ? `<span class="project-tag-pill">@${escapeHtml(pTag)}</span>` : ''}
                   ${repLabel ? `<span class="repeat-badge">${escapeHtml(repLabel)}</span>` : ''}
                 </span>
                 <span class="tb-title">${escapeHtml(p.title)}</span>
               </div>
               <div class="tb-actions">
+                <button type="button" class="tb-mini-btn tb-step-btn plan-minus-btn" title="소요 시간 15분 줄이기">-15분</button>
+                <button type="button" class="tb-mini-btn tb-step-btn plan-plus-btn" title="소요 시간 15분 늘리기">+15분</button>
                 <button type="button" class="tb-mini-btn plan-run-btn" title="이 일정을 지금 시작하고 실제 시간을 측정합니다">시작</button>
                 <button type="button" class="tb-mini-btn plan-done-btn" title="계획 일정과 동일한 시간으로 실제 사용 시간에 즉시 기록합니다">${isPlanDone ? '완료됨' : '완료 기록'}</button>
               </div>
             `;
             block.addEventListener('click', e => {
-              if (e.target.closest('button')) return;
+              if (e.target.closest('button') || e.target.closest('.tb-resize-handle') || isJustDraggedOrResized()) return;
               openItemModalForEdit('schedule', p);
+            });
+            block.querySelector('.plan-minus-btn').addEventListener('click', e => {
+              e.stopPropagation();
+              adjustItemDurationByStep(p, -15);
+            });
+            block.querySelector('.plan-plus-btn').addEventListener('click', e => {
+              e.stopPropagation();
+              adjustItemDurationByStep(p, 15);
             });
             block.querySelector('.plan-run-btn').addEventListener('click', e => {
               e.stopPropagation();
@@ -1734,11 +2044,21 @@
               saveState();
               renderAll();
             });
+
+            makeItemDraggable(block, 'schedule', p, selectedDate);
+            const rangeTextEl = block.querySelector('.tb-time-range-text');
+            attachDurationResizeHandle(block, p, (previewEnd, previewDur) => {
+              if (rangeTextEl) {
+                rangeTextEl.textContent = `${p.startTime} ~ ${previewEnd} · ${previewDur}분 ${p.alarm ? '🔔' : ''} ${p.important ? '★ 중요' : ''}`;
+              }
+              block.style.minHeight = `${calcBlockMinHeightPx(previewDur)}px`;
+            });
+
             planCol.appendChild(block);
           });
         }
         planCol.addEventListener('click', e => {
-          if (e.target.closest('.timeline-block')) return;
+          if (e.target.closest('.timeline-block') || isJustDraggedOrResized()) return;
           openItemModalForCreate('schedule', hourStr, nextHourStr);
         });
         row.appendChild(planCol);
@@ -1747,8 +2067,12 @@
       if (showActual) {
         const actualCol = document.createElement('div');
         actualCol.className = 'dt-slot-cell';
+        actualCol.dataset.slotType = 'actual';
+        actualCol.dataset.hour = String(hour);
+        makeSlotDroppable(actualCol, { targetType: 'actual', targetDate: selectedDate, targetHour: hour });
+
         if (actualsInHour.length === 0) {
-          actualCol.innerHTML = `<span class="dt-empty-hint">+ ${hourStr} 실제 기록</span>`;
+          actualCol.innerHTML = `<span class="dt-empty-hint">+ ${hourStr} 실제 기록 또는 드롭</span>`;
         } else {
           actualsInHour.forEach(a => {
             const cat = getCategoryById(a.categoryId);
@@ -1758,26 +2082,48 @@
             block.className = 'timeline-block';
             block.style.background = `${cat.color}24`;
             block.style.borderLeftColor = cat.color;
+            block.style.minHeight = `${calcBlockMinHeightPx(dur)}px`;
             block.innerHTML = `
               <div class="tb-info">
                 <span class="tb-time" style="color:${cat.color};display:flex;align-items:center;gap:4px;flex-wrap:wrap;">
-                  <span>${a.startTime} ~ ${a.endTime} · ${dur}분 진행</span>
+                  <span class="tb-time-range-text">${a.startTime} ~ ${a.endTime} · ${dur}분 진행</span>
                   ${aTag ? `<span class="project-tag-pill">@${escapeHtml(aTag)}</span>` : ''}
                 </span>
                 <span class="tb-title">${escapeHtml(a.title)}</span>
               </div>
               <div class="tb-actions">
+                <button type="button" class="tb-mini-btn tb-step-btn act-minus-btn" title="소요 시간 15분 줄이기">-15분</button>
+                <button type="button" class="tb-mini-btn tb-step-btn act-plus-btn" title="소요 시간 15분 늘리기">+15분</button>
                 <button type="button" class="tb-mini-btn actual-edit-btn">수정</button>
               </div>
             `;
-            block.addEventListener('click', () => {
+            block.querySelector('.act-minus-btn').addEventListener('click', e => {
+              e.stopPropagation();
+              adjustItemDurationByStep(a, -15);
+            });
+            block.querySelector('.act-plus-btn').addEventListener('click', e => {
+              e.stopPropagation();
+              adjustItemDurationByStep(a, 15);
+            });
+            block.addEventListener('click', e => {
+              if (e.target.closest('.tb-step-btn') || e.target.closest('.tb-resize-handle') || isJustDraggedOrResized()) return;
               openItemModalForEdit('actual', a);
             });
+
+            makeItemDraggable(block, 'actual', a, selectedDate);
+            const rangeTextEl = block.querySelector('.tb-time-range-text');
+            attachDurationResizeHandle(block, a, (previewEnd, previewDur) => {
+              if (rangeTextEl) {
+                rangeTextEl.textContent = `${a.startTime} ~ ${previewEnd} · ${previewDur}분 진행`;
+              }
+              block.style.minHeight = `${calcBlockMinHeightPx(previewDur)}px`;
+            });
+
             actualCol.appendChild(block);
           });
         }
         actualCol.addEventListener('click', e => {
-          if (e.target.closest('.timeline-block')) return;
+          if (e.target.closest('.timeline-block') || isJustDraggedOrResized()) return;
           openItemModalForCreate('actual', hourStr, nextHourStr);
         });
         row.appendChild(actualCol);
@@ -2335,6 +2681,7 @@
       ]
         .filter(Boolean)
         .join(' ');
+      makeSlotDroppable(div, { targetType: 'day', targetDate: cell.dateStr });
 
       const dayTodos = state.todos.filter(
         t => matchesSelectedProjectTag(t) && doesItemOccurOnDate(t, cell.dateStr, true)
@@ -2418,9 +2765,10 @@
           });
           pill.addEventListener('click', e => {
             e.stopPropagation();
-            if (e.target.classList.contains('mc-inline-check')) return;
+            if (e.target.classList.contains('mc-inline-check') || isJustDraggedOrResized()) return;
             openItemModalForEdit('todo', todo);
           });
+          makeItemDraggable(pill, 'todo', todo, cell.dateStr);
           stack.appendChild(pill);
         });
       }
@@ -2445,8 +2793,10 @@
           `;
           pill.addEventListener('click', e => {
             e.stopPropagation();
+            if (isJustDraggedOrResized()) return;
             openItemModalForEdit('schedule', plan);
           });
+          makeItemDraggable(pill, 'schedule', plan, cell.dateStr);
           stack.appendChild(pill);
         });
       }
@@ -2470,8 +2820,10 @@
           `;
           pill.addEventListener('click', e => {
             e.stopPropagation();
+            if (isJustDraggedOrResized()) return;
             openItemModalForEdit('schedule', plan);
           });
+          makeItemDraggable(pill, 'schedule', plan, cell.dateStr);
           stack.appendChild(pill);
         });
       } else if (mode === 'focus' && regularPlans.length > 0) {
@@ -2554,6 +2906,7 @@
       ]
         .filter(Boolean)
         .join(' ');
+      makeSlotDroppable(col, { targetType: mode === 'actual' ? 'actual' : 'schedule', targetDate: dStr });
 
       // 상단 요일 헤더
       const head = document.createElement('div');
@@ -2618,9 +2971,10 @@
           });
           tCard.addEventListener('click', e => {
             e.stopPropagation();
-            if (e.target.tagName === 'INPUT') return;
+            if (e.target.tagName === 'INPUT' || isJustDraggedOrResized()) return;
             openItemModalForEdit('todo', todo);
           });
+          makeItemDraggable(tCard, 'todo', todo, dStr);
           listWrap.appendChild(tCard);
         });
       }
@@ -2692,9 +3046,10 @@
             });
             card.addEventListener('click', e => {
               e.stopPropagation();
-              if (e.target.closest('button')) return;
+              if (e.target.closest('button') || isJustDraggedOrResized()) return;
               openItemModalForEdit('schedule', item);
             });
+            makeItemDraggable(card, 'schedule', item, dStr);
           } else {
             const dur = durationMinutes(item.startTime, item.endTime);
             card.className = 'wk-item-card wk-actual-card';
@@ -2713,8 +3068,10 @@
             `;
             card.addEventListener('click', e => {
               e.stopPropagation();
+              if (isJustDraggedOrResized()) return;
               openItemModalForEdit('actual', item);
             });
+            makeItemDraggable(card, 'actual', item, dStr);
           }
 
           listWrap.appendChild(card);
@@ -2828,6 +3185,11 @@
         const dStr = dayObj.dateStr;
         const slot = document.createElement('div');
         slot.className = `wk-tt-slot ${dStr === todayStr ? 'is-today-col' : ''}`;
+        makeSlotDroppable(slot, {
+          targetType: mode === 'actual' ? 'actual' : 'schedule',
+          targetDate: dStr,
+          targetHour: hour
+        });
 
         if (showPlan) {
           const plansInHour = state.schedules.filter(
@@ -2840,17 +3202,26 @@
             const cat = getCategoryById(p.categoryId);
             const isPlanDone = isItemCompletedOnDate(p, dStr);
             const pTag = cleanProjectTag(p.projectTag);
+            const dur = durationMinutes(p.startTime, p.endTime);
             const chip = document.createElement('div');
             chip.className = `wk-tt-chip plan ${isPlanDone ? 'is-done' : ''}`;
             chip.style.borderLeftColor = cat.color;
             chip.innerHTML = `
-              <span class="wk-tt-chip-tag plan">${p.repeat && p.repeat !== 'none' ? '🔁' : '계획'}</span>
+              <span class="wk-tt-chip-tag plan">${p.repeat && p.repeat !== 'none' ? '🔁' : '계획'} ${p.startTime}~${p.endTime} · ${dur}분</span>
               ${pTag ? `<span class="project-tag-pill">@${escapeHtml(pTag)}</span>` : ''}
               <span class="wk-tt-chip-title">${p.important ? '★ ' : ''}${escapeHtml(p.title)}</span>
             `;
             chip.addEventListener('click', e => {
               e.stopPropagation();
+              if (e.target.closest('.tb-resize-handle') || isJustDraggedOrResized()) return;
               openItemModalForEdit('schedule', p);
+            });
+            makeItemDraggable(chip, 'schedule', p, dStr);
+            const tagEl = chip.querySelector('.wk-tt-chip-tag');
+            attachDurationResizeHandle(chip, p, (previewEnd, previewDur) => {
+              if (tagEl) {
+                tagEl.textContent = `${p.repeat && p.repeat !== 'none' ? '🔁' : '계획'} ${p.startTime}~${previewEnd} · ${previewDur}분`;
+              }
             });
             slot.appendChild(chip);
           });
@@ -2872,19 +3243,28 @@
             chip.style.borderLeftColor = cat.color;
             chip.style.background = `${cat.color}18`;
             chip.innerHTML = `
-              <span class="wk-tt-chip-tag actual">진행 ${dur}분</span>
+              <span class="wk-tt-chip-tag actual">진행 ${a.startTime}~${a.endTime} · ${dur}분</span>
               ${aTag ? `<span class="project-tag-pill">@${escapeHtml(aTag)}</span>` : ''}
               <span class="wk-tt-chip-title">${escapeHtml(a.title)}</span>
             `;
             chip.addEventListener('click', e => {
               e.stopPropagation();
+              if (e.target.closest('.tb-resize-handle') || isJustDraggedOrResized()) return;
               openItemModalForEdit('actual', a);
+            });
+            makeItemDraggable(chip, 'actual', a, dStr);
+            const tagEl = chip.querySelector('.wk-tt-chip-tag');
+            attachDurationResizeHandle(chip, a, (previewEnd, previewDur) => {
+              if (tagEl) {
+                tagEl.textContent = `진행 ${a.startTime}~${previewEnd} · ${previewDur}분`;
+              }
             });
             slot.appendChild(chip);
           });
         }
 
         slot.addEventListener('click', () => {
+          if (isJustDraggedOrResized()) return;
           selectedDate = dStr;
           openItemModalForCreate(mode === 'actual' ? 'actual' : 'schedule', hourStr, nextHourStr);
         });
@@ -4050,6 +4430,428 @@
     }
   }
 
+  // -------------------- 구글 캘린더 등록 & 표준 캘린더 파일(.ics) 내보내기 · 가져오기 --------------------
+  function escapeIcsText(str) {
+    return String(str || '')
+      .replace(/\\/g, '\\\\')
+      .replace(/;/g, '\\;')
+      .replace(/,/g, '\\,')
+      .replace(/\r?\n/g, '\\n');
+  }
+
+  function unescapeIcsText(str) {
+    return String(str || '')
+      .replace(/\\n/gi, '\n')
+      .replace(/\\,/g, ',')
+      .replace(/\\;/g, ';')
+      .replace(/\\\\/g, '\\');
+  }
+
+  function toIcsDateCompact(dateStr) {
+    return String(dateStr || getTodayStr()).replace(/-/g, '');
+  }
+
+  function toIcsTimeCompact(timeStr) {
+    const clean = String(timeStr || '09:00').replace(':', '');
+    return `${clean.padStart(4, '0')}00`;
+  }
+
+  function getIcsRruleString(repeat) {
+    if (repeat === 'daily') return 'FREQ=DAILY';
+    if (repeat === 'weekdays') return 'FREQ=WEEKLY;BYDAY=MO,TU,WE,TH,FR';
+    if (repeat === 'weekly') return 'FREQ=WEEKLY';
+    if (repeat === 'monthly') return 'FREQ=MONTHLY';
+    return '';
+  }
+
+  function openGoogleCalendarFromModal() {
+    const type = document.getElementById('itemModalType')?.value || 'schedule';
+    const rawTitle = document.getElementById('itemModalTitle')?.value.trim() || '타임플로우 일정';
+    const date = document.getElementById('itemModalDate')?.value || selectedDate;
+    const catId = document.getElementById('itemModalCategory')?.value;
+    const cat = getCategoryById(catId);
+    const pTag = cleanProjectTag(document.getElementById('itemModalProjectTag')?.value || '');
+    const repeat = document.getElementById('itemModalRepeat')?.value || 'none';
+    const startTime = document.getElementById('itemModalStartTime')?.value || '09:00';
+    let endTime = document.getElementById('itemModalEndTime')?.value || '10:00';
+    if (type !== 'todo' && timeToMinutes(endTime) <= timeToMinutes(startTime)) {
+      endTime = minutesToTime(timeToMinutes(startTime) + 30);
+    }
+
+    const displayTitle = pTag ? `@${pTag} ${rawTitle}` : rawTitle;
+    let datesParam = '';
+    if (type === 'todo') {
+      const dStart = toIcsDateCompact(date);
+      const dEnd = toIcsDateCompact(addDaysStr(date, 1));
+      datesParam = `${dStart}/${dEnd}`;
+    } else {
+      const dCompact = toIcsDateCompact(date);
+      datesParam = `${dCompact}T${toIcsTimeCompact(startTime)}/${dCompact}T${toIcsTimeCompact(endTime)}`;
+    }
+
+    const detailLines = [`카테고리: ${cat.name}`];
+    if (pTag) detailLines.push(`프로젝트 태그: @${pTag}`);
+    detailLines.push('타임플로우 플래너에서 등록됨');
+
+    const params = new URLSearchParams({
+      action: 'TEMPLATE',
+      text: displayTitle,
+      dates: datesParam,
+      details: detailLines.join('\n'),
+      ctz: 'Asia/Seoul'
+    });
+
+    const rrule = type !== 'actual' ? getIcsRruleString(repeat) : '';
+    if (rrule) {
+      params.set('recur', `RRULE:${rrule}`);
+    }
+
+    const url = `https://calendar.google.com/calendar/render?${params.toString()}`;
+    window.open(url, '_blank', 'noopener,noreferrer');
+    showToast('구글 캘린더 일정 등록 화면을 새 창으로 열었습니다.');
+  }
+
+  function exportCalendarIcsFile() {
+    const includeTodosEl = document.getElementById('icsIncludeTodos');
+    const includeActualsEl = document.getElementById('icsIncludeActuals');
+    const includeTodos = includeTodosEl ? includeTodosEl.checked : true;
+    const includeActuals = includeActualsEl ? includeActualsEl.checked : false;
+
+    const nowUtc = new Date()
+      .toISOString()
+      .replace(/[-:]/g, '')
+      .replace(/\.\d{3}/, '');
+
+    const lines = [
+      'BEGIN:VCALENDAR',
+      'VERSION:2.0',
+      'PRODID:-//TimeFlow Planner//TimeFlow Calendar 1.0//KO',
+      'CALSCALE:GREGORIAN',
+      'METHOD:PUBLISH',
+      'X-WR-CALNAME:타임플로우 일정',
+      'X-WR-TIMEZONE:Asia/Seoul',
+      'BEGIN:VTIMEZONE',
+      'TZID:Asia/Seoul',
+      'BEGIN:STANDARD',
+      'TZOFFSETFROM:+0900',
+      'TZOFFSETTO:+0900',
+      'TZNAME:KST',
+      'DTSTART:19700101T000000',
+      'END:STANDARD',
+      'END:VTIMEZONE'
+    ];
+
+    let exportedCount = 0;
+
+    state.schedules.forEach(sch => {
+      if (!matchesSelectedProjectTag(sch)) return;
+      const cat = getCategoryById(sch.categoryId);
+      const pTag = cleanProjectTag(sch.projectTag);
+      const dCompact = toIcsDateCompact(sch.date || selectedDate);
+      const dtStart = `${dCompact}T${toIcsTimeCompact(sch.startTime || '09:00')}`;
+      const dtEnd = `${dCompact}T${toIcsTimeCompact(sch.endTime || '10:00')}`;
+      const summary = pTag ? `@${pTag} ${sch.title}` : sch.title;
+      const descParts = [`카테고리: ${cat.name}`];
+      if (pTag) descParts.push(`프로젝트 태그: @${pTag}`);
+      if (sch.important) descParts.push('중요 일정');
+
+      lines.push('BEGIN:VEVENT');
+      lines.push(`UID:${sch.id || uid('sch')}@timeflow-planner.h1s.workers.dev`);
+      lines.push(`DTSTAMP:${nowUtc}`);
+      lines.push(`DTSTART;TZID=Asia/Seoul:${dtStart}`);
+      lines.push(`DTEND;TZID=Asia/Seoul:${dtEnd}`);
+      const rrule = getIcsRruleString(sch.repeat);
+      if (rrule) {
+        lines.push(`RRULE:${rrule}`);
+      }
+      lines.push(`SUMMARY:${escapeIcsText(summary)}`);
+      lines.push(`CATEGORIES:${escapeIcsText(cat.name)}`);
+      lines.push(`DESCRIPTION:${escapeIcsText(descParts.join('\n'))}`);
+      lines.push('END:VEVENT');
+      exportedCount++;
+    });
+
+    if (includeTodos) {
+      state.todos.forEach(todo => {
+        if (!matchesSelectedProjectTag(todo)) return;
+        const baseDate = todo.dueDate || (todo.repeat && todo.repeat !== 'none' ? selectedDate : '');
+        if (!baseDate) return;
+        const cat = getCategoryById(todo.categoryId);
+        const pTag = cleanProjectTag(todo.projectTag);
+        const dStart = toIcsDateCompact(baseDate);
+        const dEnd = toIcsDateCompact(addDaysStr(baseDate, 1));
+        const summary = `${pTag ? `@${pTag} ` : ''}마감: ${todo.title}`;
+        const descParts = [`구분: 할 일 마감`, `카테고리: ${cat.name}`];
+        if (pTag) descParts.push(`프로젝트 태그: @${pTag}`);
+
+        lines.push('BEGIN:VEVENT');
+        lines.push(`UID:${todo.id || uid('todo')}@timeflow-planner.h1s.workers.dev`);
+        lines.push(`DTSTAMP:${nowUtc}`);
+        lines.push(`DTSTART;VALUE=DATE:${dStart}`);
+        lines.push(`DTEND;VALUE=DATE:${dEnd}`);
+        const rrule = getIcsRruleString(todo.repeat);
+        if (rrule) {
+          lines.push(`RRULE:${rrule}`);
+        }
+        lines.push(`SUMMARY:${escapeIcsText(summary)}`);
+        lines.push(`CATEGORIES:${escapeIcsText(cat.name)}`);
+        lines.push(`DESCRIPTION:${escapeIcsText(descParts.join('\n'))}`);
+        lines.push('END:VEVENT');
+        exportedCount++;
+      });
+    }
+
+    if (includeActuals) {
+      state.actualLogs.forEach(act => {
+        if (!matchesSelectedProjectTag(act)) return;
+        const cat = getCategoryById(act.categoryId);
+        const pTag = cleanProjectTag(act.projectTag);
+        const dCompact = toIcsDateCompact(act.date || selectedDate);
+        const dtStart = `${dCompact}T${toIcsTimeCompact(act.startTime || '09:00')}`;
+        const dtEnd = `${dCompact}T${toIcsTimeCompact(act.endTime || '10:00')}`;
+        const summary = `[진행 기록] ${pTag ? `@${pTag} ` : ''}${act.title}`;
+
+        lines.push('BEGIN:VEVENT');
+        lines.push(`UID:${act.id || uid('act')}@timeflow-planner.h1s.workers.dev`);
+        lines.push(`DTSTAMP:${nowUtc}`);
+        lines.push(`DTSTART;TZID=Asia/Seoul:${dtStart}`);
+        lines.push(`DTEND;TZID=Asia/Seoul:${dtEnd}`);
+        lines.push(`SUMMARY:${escapeIcsText(summary)}`);
+        lines.push(`CATEGORIES:${escapeIcsText(cat.name)}`);
+        lines.push(`DESCRIPTION:${escapeIcsText(`구분: 타임트래커 실제 기록\n카테고리: ${cat.name}`)}`);
+        lines.push('END:VEVENT');
+        exportedCount++;
+      });
+    }
+
+    lines.push('END:VCALENDAR');
+
+    const icsContent = lines.join('\r\n');
+    const blob = new Blob([icsContent], { type: 'text/calendar;charset=utf-8' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    const tagSuffix = selectedProjectTag && selectedProjectTag !== '__UNTAGGED__' ? `_${selectedProjectTag}` : '';
+    a.download = `timeflow_calendar${tagSuffix}_${getTodayStr()}.ics`;
+    a.click();
+    URL.revokeObjectURL(url);
+
+    const statusEl = document.getElementById('icsSyncStatusText');
+    if (statusEl) {
+      statusEl.textContent = `총 ${exportedCount}건의 항목이 표준 캘린더 파일로 다운로드되었습니다.`;
+    }
+    showToast(`총 ${exportedCount}건의 일정을 표준 캘린더 파일로 내보냈습니다.`);
+  }
+
+  function parseIcsDateTimeValue(propKey, rawVal) {
+    const val = String(rawVal || '').trim();
+    if (!val) return null;
+
+    if (/VALUE=DATE/i.test(propKey) || /^\d{8}$/.test(val)) {
+      const y = val.slice(0, 4);
+      const m = val.slice(4, 6);
+      const d = val.slice(6, 8);
+      return {
+        isAllDay: true,
+        dateStr: `${y}-${m}-${d}`,
+        timeStr: '09:00'
+      };
+    }
+
+    const match = val.match(/^(\d{4})(\d{2})(\d{2})T(\d{2})(\d{2})(\d{2})?(Z)?$/i);
+    if (!match) return null;
+
+    const [, yStr, mStr, dStr, hhStr, mmStr, , isUtc] = match;
+    if (isUtc) {
+      const utcDate = new Date(Date.UTC(Number(yStr), Number(mStr) - 1, Number(dStr), Number(hhStr), Number(mmStr)));
+      return {
+        isAllDay: false,
+        dateStr: toDateStr(utcDate),
+        timeStr: `${String(utcDate.getHours()).padStart(2, '0')}:${String(utcDate.getMinutes()).padStart(2, '0')}`
+      };
+    }
+
+    return {
+      isAllDay: false,
+      dateStr: `${yStr}-${mStr}-${dStr}`,
+      timeStr: `${hhStr}:${mmStr}`
+    };
+  }
+
+  function parseIcsRruleToRepeat(rruleStr) {
+    const raw = String(rruleStr || '').toUpperCase();
+    if (!raw) return 'none';
+    if (raw.includes('BYDAY=MO,TU,WE,TH,FR')) return 'weekdays';
+    if (raw.includes('FREQ=DAILY')) return 'daily';
+    if (raw.includes('FREQ=WEEKLY')) return 'weekly';
+    if (raw.includes('FREQ=MONTHLY')) return 'monthly';
+    return 'none';
+  }
+
+  function importCalendarIcsText(icsText) {
+    const unfolded = String(icsText || '').replace(/\r?\n[ \t]/g, '');
+    const eventBlocks = unfolded.split(/BEGIN:VEVENT/i).slice(1);
+    if (eventBlocks.length === 0) {
+      showToast('캘린더 파일에서 가져올 수 있는 일정 항목을 찾지 못했습니다.');
+      return;
+    }
+
+    let addedSchedules = 0;
+    let addedTodos = 0;
+    let addedActuals = 0;
+
+    eventBlocks.forEach(rawBlock => {
+      const blockBody = rawBlock.split(/END:VEVENT/i)[0] || '';
+      const lines = blockBody.split(/\r?\n/).map(l => l.trim()).filter(Boolean);
+
+      let summary = '';
+      let description = '';
+      let categoriesText = '';
+      let rrule = '';
+      let dtStartInfo = null;
+      let dtEndInfo = null;
+
+      lines.forEach(line => {
+        const colonIdx = line.indexOf(':');
+        if (colonIdx === -1) return;
+        const propKey = line.slice(0, colonIdx).trim();
+        const propVal = line.slice(colonIdx + 1).trim();
+        const baseName = propKey.split(';')[0].toUpperCase();
+
+        if (baseName === 'SUMMARY') summary = unescapeIcsText(propVal);
+        else if (baseName === 'DESCRIPTION') description = unescapeIcsText(propVal);
+        else if (baseName === 'CATEGORIES') categoriesText = unescapeIcsText(propVal);
+        else if (baseName === 'RRULE') rrule = propVal;
+        else if (baseName === 'DTSTART') dtStartInfo = parseIcsDateTimeValue(propKey, propVal);
+        else if (baseName === 'DTEND') dtEndInfo = parseIcsDateTimeValue(propKey, propVal);
+      });
+
+      if (!summary || !dtStartInfo) return;
+
+      let cleanTitle = summary.trim();
+      let projectTag =
+        selectedProjectTag && selectedProjectTag !== '__UNTAGGED__' ? selectedProjectTag : '';
+
+      const titleTagMatch = cleanTitle.match(/@([^\s#,]+)/);
+      if (titleTagMatch) {
+        projectTag = cleanProjectTag(titleTagMatch[1]);
+        cleanTitle = cleanTitle.replace(titleTagMatch[0], '').trim();
+      } else {
+        const descTagMatch = description.match(/프로젝트\s*태그\s*:\s*@?([^\s\n]+)/);
+        if (descTagMatch) {
+          projectTag = cleanProjectTag(descTagMatch[1]);
+        }
+      }
+
+      let categoryId = state.categories[0]?.id || 'cat_work';
+      if (categoriesText) {
+        const foundCat = state.categories.find(
+          c => c.name === categoriesText || categoriesText.includes(c.name) || c.name.includes(categoriesText)
+        );
+        if (foundCat) categoryId = foundCat.id;
+      }
+
+      const repeat = parseIcsRruleToRepeat(rrule);
+
+      if (/^\[진행 기록\]|^\[실제 기록\]/.test(cleanTitle) || /구분:\s*타임트래커 실제 기록/.test(description)) {
+        cleanTitle = cleanTitle.replace(/^\[진행 기록\]|^\[실제 기록\]/, '').trim() || '진행 기록';
+        const startTime = dtStartInfo.timeStr || '09:00';
+        let endTime =
+          dtEndInfo && !dtEndInfo.isAllDay
+            ? dtEndInfo.timeStr
+            : minutesToTime(timeToMinutes(startTime) + 60);
+        if (timeToMinutes(endTime) <= timeToMinutes(startTime)) {
+          endTime = minutesToTime(timeToMinutes(startTime) + 30);
+        }
+        const exists = state.actualLogs.some(
+          a => a.date === dtStartInfo.dateStr && a.startTime === startTime && a.title === cleanTitle
+        );
+        if (!exists) {
+          state.actualLogs.push({
+            id: uid('act'),
+            title: cleanTitle,
+            date: dtStartInfo.dateStr,
+            startTime,
+            endTime,
+            categoryId,
+            projectTag
+          });
+          addedActuals++;
+        }
+        return;
+      }
+
+      if (dtStartInfo.isAllDay && (/^마감:/.test(cleanTitle) || /구분:\s*할 일 마감/.test(description))) {
+        cleanTitle = cleanTitle.replace(/^마감:\s*/, '').trim() || '할 일';
+        const exists = state.todos.some(
+          t => t.dueDate === dtStartInfo.dateStr && t.title === cleanTitle
+        );
+        if (!exists) {
+          state.todos.push({
+            id: uid('todo'),
+            title: cleanTitle,
+            dueDate: dtStartInfo.dateStr,
+            categoryId,
+            projectTag,
+            repeat,
+            completedDates: [],
+            estimatedMinutes: 30,
+            important: true,
+            completed: false
+          });
+          addedTodos++;
+        }
+        return;
+      }
+
+      const startTime = dtStartInfo.isAllDay ? '09:00' : dtStartInfo.timeStr || '09:00';
+      let endTime =
+        dtEndInfo && !dtEndInfo.isAllDay
+          ? dtEndInfo.timeStr
+          : minutesToTime(timeToMinutes(startTime) + 60);
+      if (timeToMinutes(endTime) <= timeToMinutes(startTime)) {
+        endTime = minutesToTime(timeToMinutes(startTime) + 60);
+      }
+
+      const exists = state.schedules.some(
+        s => s.date === dtStartInfo.dateStr && s.startTime === startTime && s.title === cleanTitle
+      );
+      if (!exists) {
+        state.schedules.push({
+          id: uid('sch'),
+          title: cleanTitle,
+          date: dtStartInfo.dateStr,
+          startTime,
+          endTime,
+          categoryId,
+          projectTag,
+          repeat,
+          completedDates: [],
+          alarm: true,
+          important: /중요 일정|★/.test(description) || dtStartInfo.isAllDay,
+          completed: false
+        });
+        addedSchedules++;
+      }
+    });
+
+    const totalAdded = addedSchedules + addedTodos + addedActuals;
+    if (totalAdded === 0) {
+      showToast('모든 항목이 이미 등록되어 있어 새로 추가된 일정이 없습니다.');
+      return;
+    }
+
+    saveState();
+    renderAll();
+
+    const statusEl = document.getElementById('icsSyncStatusText');
+    const summaryMsg = `일정 ${addedSchedules}건, 할 일 마감 ${addedTodos}건, 진행 기록 ${addedActuals}건을 가져왔습니다.`;
+    if (statusEl) {
+      statusEl.textContent = summaryMsg;
+    }
+    showToast(`캘린더 가져오기 완료 · ${summaryMsg}`);
+  }
+
   // -------------------- 예시 기록 풍부하게 채우기 (타임트래커 분석 체험용) --------------------
   function populateRichSampleReportLogs() {
     const today = getTodayStr();
@@ -4411,6 +5213,8 @@
       showToast('항목이 삭제되었습니다.');
     });
 
+    document.getElementById('itemModalGcalBtn')?.addEventListener('click', openGoogleCalendarFromModal);
+
     // 실시간 타임트래커 스톱워치 버튼
     document.getElementById('startLiveTrackerBtn').addEventListener('click', () => {
       const title = document.getElementById('liveTrackerTitle').value.trim() || '집중 업무 및 학습';
@@ -4596,6 +5400,22 @@
     document.getElementById('calAddScheduleBtn')?.addEventListener('click', () => openItemModalForCreate('schedule'));
     document.getElementById('calAddTodoBtn')?.addEventListener('click', () => openItemModalForCreate('todo'));
     document.getElementById('calAddActualBtn')?.addEventListener('click', () => openItemModalForCreate('actual'));
+    document.getElementById('calExportIcsBtn')?.addEventListener('click', exportCalendarIcsFile);
+    document.getElementById('calImportIcsInput')?.addEventListener('change', e => {
+      const file = e.target.files?.[0];
+      if (!file) return;
+      const reader = new FileReader();
+      reader.onload = ev => {
+        try {
+          importCalendarIcsText(String(ev.target.result || ''));
+        } catch (_) {
+          showToast('캘린더 파일을 읽는 중 오류가 발생했습니다.');
+        } finally {
+          e.target.value = '';
+        }
+      };
+      reader.readAsText(file);
+    });
 
     // 탭 4: 타임트래커 보고서 및 다음 달 목표 이벤트
     document.querySelectorAll('#reportPeriodTabs .filter-pill').forEach(btn => {
@@ -4704,6 +5524,23 @@
     });
     document.getElementById('cloudSaveBtn').addEventListener('click', () => syncToCloud('save'));
     document.getElementById('cloudLoadBtn').addEventListener('click', () => syncToCloud('load'));
+
+    document.getElementById('exportIcsBtn')?.addEventListener('click', exportCalendarIcsFile);
+    document.getElementById('importIcsInput')?.addEventListener('change', e => {
+      const file = e.target.files?.[0];
+      if (!file) return;
+      const reader = new FileReader();
+      reader.onload = ev => {
+        try {
+          importCalendarIcsText(String(ev.target.result || ''));
+        } catch (_) {
+          showToast('캘린더 파일을 읽는 중 오류가 발생했습니다.');
+        } finally {
+          e.target.value = '';
+        }
+      };
+      reader.readAsText(file);
+    });
 
     document.getElementById('exportJsonBtn').addEventListener('click', () => {
       const blob = new Blob([JSON.stringify(state, null, 2)], { type: 'application/json' });

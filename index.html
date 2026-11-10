@@ -101,9 +101,9 @@
         <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2"><circle cx="13.5" cy="6.5" r=".5"/><circle cx="17.5" cy="10.5" r=".5"/><circle cx="8.5" cy="7.5" r=".5"/><circle cx="6.5" cy="12.5" r=".5"/><path d="M12 2C6.5 2 2 6.5 2 12s4.5 10 10 10c.926 0 1.648-.746 1.648-1.688 0-.437-.18-.835-.437-1.125-.29-.289-.438-.652-.438-1.125a1.64 1.64 0 0 1 1.668-1.668h1.996c3.051 0 5.555-2.503 5.555-5.554C21.965 6.012 17.461 2 12 2z"/></svg>
         <span>카테고리 설정</span>
       </button>
-      <button type="button" id="openSyncModalBtn" class="icon-pill-btn" title="PC와 스마트폰 실시간 클라우드 동기화 및 파일 백업을 관리합니다">
+      <button type="button" id="openSyncModalBtn" class="icon-pill-btn" title="PC와 스마트폰 실시간 동기화, 구글·애플 캘린더 파일 연동 및 백업을 관리합니다">
         <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/></svg>
-        <span>동기화 · 백업</span>
+        <span>동기화 · 캘린더 연동</span>
       </button>
     </div>
   </header>
@@ -261,7 +261,7 @@
                   <h2 id="timelineDateTitle" class="panel-title">11월 9일 월요일</h2>
                   <button type="button" id="nextDayBtn" class="icon-btn" aria-label="다음 기간">&rsaquo;</button>
                 </div>
-                <p id="timelineSubdesc" class="panel-subdesc">좌측 열은 계획 일정, 우측 열은 실제 사용 시간입니다. 빈 칸을 누르면 바로 추가됩니다.</p>
+                <p id="timelineSubdesc" class="panel-subdesc">블록을 드래그해 시간대를 옮기거나 하단 바를 끌어 소요 시간을 조절할 수 있습니다.</p>
               </div>
               <div class="timeline-head-actions">
                 <div class="scope-seg-group" id="dashScopeTabs" role="tablist" aria-label="기간 단위 선택">
@@ -482,6 +482,11 @@
               <button type="button" id="calAddScheduleBtn" class="btn-xs btn-primary">일정 추가</button>
               <button type="button" id="calAddTodoBtn" class="btn-xs btn-outline">할 일 마감 추가</button>
               <button type="button" id="calAddActualBtn" class="btn-xs btn-teal">실제 시간 기록</button>
+              <button type="button" id="calExportIcsBtn" class="btn-xs btn-outline" title="구글 캘린더나 애플 캘린더에서 바로 열 수 있는 표준 캘린더 파일로 내보냅니다">캘린더 내보내기</button>
+              <label class="btn-xs btn-outline file-upload-label" title="구글 캘린더나 애플 캘린더에서 내보낸 캘린더 파일을 가져옵니다">
+                <span>캘린더 가져오기</span>
+                <input type="file" id="calImportIcsInput" accept=".ics,text/calendar" class="hidden" />
+              </label>
             </div>
           </div>
 
@@ -835,7 +840,10 @@
           </label>
         </div>
         <div class="modal-foot">
-          <button type="button" id="itemModalDeleteBtn" class="btn-danger-ghost hidden">삭제</button>
+          <div class="modal-foot-left">
+            <button type="button" id="itemModalDeleteBtn" class="btn-danger-ghost hidden">삭제</button>
+            <button type="button" id="itemModalGcalBtn" class="btn-outline btn-xs" title="현재 입력된 일정을 구글 캘린더 등록 화면으로 바로 전달합니다">구글 캘린더 등록</button>
+          </div>
           <div class="modal-foot-right">
             <button type="button" class="btn-ghost" data-close="itemModal">취소</button>
             <button type="submit" class="btn-primary">저장</button>
@@ -898,9 +906,9 @@
 
   <!-- ==================== 모달 5: 클라우드 동기화 및 파일 백업 모달 ==================== -->
   <div id="syncModal" class="modal-backdrop hidden" role="dialog" aria-modal="true">
-    <div class="modal-box">
+    <div class="modal-box modal-box-wide">
       <div class="modal-head">
-        <h3>클라우드 동기화 및 파일 백업</h3>
+        <h3>클라우드 동기화 · 캘린더 연동 · 백업</h3>
         <button type="button" class="modal-close-btn" data-close="syncModal">&times;</button>
       </div>
       <div class="sync-section">
@@ -915,7 +923,31 @@
       </div>
       <hr class="modal-divider" />
       <div class="sync-section">
-        <h4>JSON 백업 파일 내보내기 · 가져오기</h4>
+        <h4>구글 · 애플 캘린더 연동 파일 내보내기 · 가져오기</h4>
+        <p class="modal-subdesc">구글 캘린더, 애플 캘린더, 아웃룩과 호환되는 표준 캘린더 파일로 일정을 내보내거나 외부 캘린더 일정을 타임플로우로 가져옵니다.</p>
+        <div class="ics-options-row">
+          <label class="checkbox-label">
+            <input type="checkbox" id="icsIncludeTodos" checked />
+            <span>할 일 마감 함께 내보내기</span>
+          </label>
+          <label class="checkbox-label">
+            <input type="checkbox" id="icsIncludeActuals" />
+            <span>실제 진행 기록 함께 내보내기</span>
+          </label>
+        </div>
+        <div class="backup-btn-row">
+          <button type="button" id="exportIcsBtn" class="btn-primary">캘린더 파일 내보내기</button>
+          <label class="btn-teal file-upload-label">
+            <span>캘린더 파일 불러오기</span>
+            <input type="file" id="importIcsInput" accept=".ics,text/calendar" class="hidden" />
+          </label>
+          <a href="https://calendar.google.com/calendar/u/0/r/settings/export" target="_blank" rel="noopener noreferrer" class="btn-outline gcal-link-btn">구글 캘린더 가져오기 · 내보내기 설정 열기</a>
+        </div>
+        <p id="icsSyncStatusText" class="sync-status-msg">반복 주기와 프로젝트 태그, 카테고리 정보가 모두 함께 변환됩니다.</p>
+      </div>
+      <hr class="modal-divider" />
+      <div class="sync-section">
+        <h4>JSON 전체 백업 파일 내보내기 · 가져오기</h4>
         <div class="backup-btn-row">
           <button type="button" id="exportJsonBtn" class="btn-outline">파일 백업 다운로드</button>
           <label class="btn-outline file-upload-label">
