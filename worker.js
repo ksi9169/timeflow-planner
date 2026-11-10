@@ -255,8 +255,10 @@ async function handleAiRequest(request, env) {
 
 [분류 기준]
 1. "아까 ~했어", "2시부터 4시까지 코딩했음", "~완료했어"처럼 이미 한 일과 시간대가 언급되면 actualLogs에 넣으세요.
-2. 특정 날짜와 시작 시각이 있는 미래/오늘 계획("오후 3시 치과", "내일 10시~12시 회의")은 schedules에 넣으세요. 종료 시각이 없으면 기본 60분 뒤로 설정하세요.
-3. 특정 시각 없이 해야 할 과업("기획서 작성하기", "금요일까지 세금 납부")은 todos에 넣으세요.
+2. 특정 날짜와 시작 시각이 있는 계획("오후 3시 치과", "매주 수요일 14시 정기 회의")은 schedules에 넣으세요. 종료 시각이 없으면 기본 60분 뒤로 설정하세요.
+3. 특정 시각 없이 해야 할 과업("기획서 작성하기", "매주 월요일 주간 안내 발송")은 todos에 넣으세요.
+4. 문장에 "@태그명" 또는 프로젝트 성격의 묶음 키워드가 있으면 projectTag 필드에(@ 기호 제외) 넣고, 없으면 빈 문자열("")로 두세요.
+5. "매주", "매일", "평일마다", "매월" 같은 반복 표현이 있으면 repeat 필드를 "weekly" | "daily" | "weekdays" | "monthly" 중 하나로 설정하고, 없으면 "none"으로 두세요.
 
 [사용자 입력]
 "${text}"
@@ -265,13 +267,13 @@ async function handleAiRequest(request, env) {
 {
   "summary": "사용자 입력을 어떻게 등록했는지 한 줄 안내 문구",
   "schedules": [
-    { "title": "일정 제목", "date": "YYYY-MM-DD", "startTime": "HH:MM", "endTime": "HH:MM", "categoryId": "카테고리ID", "alarm": true, "important": false }
+    { "title": "일정 제목", "date": "YYYY-MM-DD", "startTime": "HH:MM", "endTime": "HH:MM", "categoryId": "카테고리ID", "projectTag": "프로젝트태그 또는 빈문자열", "repeat": "none|weekly|daily|weekdays|monthly", "alarm": true, "important": false }
   ],
   "todos": [
-    { "title": "할 일 제목", "dueDate": "YYYY-MM-DD 또는 빈문자열", "categoryId": "카테고리ID", "estimatedMinutes": 30, "important": false }
+    { "title": "할 일 제목", "dueDate": "YYYY-MM-DD 또는 빈문자열", "categoryId": "카테고리ID", "projectTag": "프로젝트태그 또는 빈문자열", "repeat": "none|weekly|daily|weekdays|monthly", "estimatedMinutes": 30, "important": false }
   ],
   "actualLogs": [
-    { "title": "실제 수행한 일", "date": "YYYY-MM-DD", "startTime": "HH:MM", "endTime": "HH:MM", "categoryId": "카테고리ID" }
+    { "title": "실제 수행한 일", "date": "YYYY-MM-DD", "startTime": "HH:MM", "endTime": "HH:MM", "categoryId": "카테고리ID", "projectTag": "프로젝트태그 또는 빈문자열" }
   ]
 }`;
 

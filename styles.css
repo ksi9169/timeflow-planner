@@ -2539,6 +2539,234 @@ button:disabled {
   padding: 18px 8px;
 }
 
+/* ==================== 프로젝트 태그 통합 필터 바 & 태그별 묶음 뷰 ==================== */
+.project-tag-bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 10px;
+  padding: 10px 14px;
+  margin-bottom: 14px;
+  background: linear-gradient(90deg, #EEF2FF 0%, #F0FDFA 100%);
+  border: 1px solid #C7D2FE;
+  border-radius: var(--radius-md);
+}
+
+.ptag-bar-left {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.ptag-bar-title {
+  font-size: 0.78rem;
+  font-weight: 800;
+  color: var(--primary);
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.ptag-chip-list {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.ptag-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 4px 11px;
+  font-size: 0.78rem;
+  font-weight: 700;
+  color: var(--text-sub);
+  background: #FFFFFF;
+  border: 1px solid #CBD5E1;
+  border-radius: 999px;
+  cursor: pointer;
+  transition: all 0.14s ease;
+}
+
+.ptag-chip:hover {
+  border-color: var(--primary);
+  color: var(--primary);
+}
+
+.ptag-chip.active {
+  background: var(--primary);
+  color: #FFFFFF;
+  border-color: var(--primary);
+  box-shadow: 0 2px 6px rgba(79, 70, 229, 0.25);
+}
+
+.ptag-chip-count {
+  font-size: 0.68rem;
+  padding: 1px 6px;
+  border-radius: 999px;
+  background: rgba(15, 23, 42, 0.08);
+  font-weight: 800;
+}
+
+.ptag-chip.active .ptag-chip-count {
+  background: rgba(255, 255, 255, 0.24);
+  color: #FFFFFF;
+}
+
+.ptag-active-summary {
+  font-size: 0.78rem;
+  font-weight: 700;
+  color: #334155;
+}
+
+.todo-head-actions {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+#toggleTodoGroupByTagBtn.active {
+  background: var(--teal);
+  color: #FFFFFF;
+  box-shadow: 0 2px 6px rgba(13, 148, 136, 0.25);
+}
+
+#toggleTodoGroupByTagBtn:not(.active) {
+  background: #F1F5F9;
+  color: var(--text-sub);
+  border: 1px solid var(--border-color);
+}
+
+.project-group-block {
+  border: 1px solid #E2E8F0;
+  border-radius: 10px;
+  background: #F8FAFC;
+  margin-bottom: 10px;
+  overflow: hidden;
+}
+
+.project-group-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 8px 11px;
+  background: linear-gradient(90deg, #EEF2FF 0%, #F8FAFC 100%);
+  border-bottom: 1px solid #E2E8F0;
+}
+
+.pg-head-left {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  flex-wrap: wrap;
+}
+
+.pg-tag-badge {
+  font-size: 0.78rem;
+  font-weight: 800;
+  color: #4338CA;
+  background: #E0E7FF;
+  padding: 2px 8px;
+  border-radius: 6px;
+}
+
+.pg-meta-stats {
+  font-size: 0.73rem;
+  font-weight: 700;
+  color: var(--text-sub);
+}
+
+.pg-head-right {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.pg-quick-add-btn {
+  font-size: 0.72rem;
+  font-weight: 700;
+  padding: 2px 7px;
+  border-radius: 5px;
+  border: 1px solid #C7D2FE;
+  background: #FFFFFF;
+  color: var(--primary);
+  cursor: pointer;
+}
+.pg-quick-add-btn:hover {
+  background: var(--primary);
+  color: #FFFFFF;
+}
+
+.pg-body-items {
+  padding: 7px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.pg-schedule-mini-list {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  margin-bottom: 2px;
+}
+
+.pg-schedule-mini-item {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 6px;
+  padding: 5px 8px;
+  border-radius: 7px;
+  background: #FFFFFF;
+  border: 1px dashed #A5B4FC;
+  font-size: 0.77rem;
+  cursor: pointer;
+}
+.pg-schedule-mini-item:hover {
+  background: #EEF2FF;
+}
+
+.project-tag-pill {
+  display: inline-flex;
+  align-items: center;
+  font-size: 0.68rem;
+  font-weight: 800;
+  color: #4338CA;
+  background: #E0E7FF;
+  padding: 1px 6px;
+  border-radius: 4px;
+  flex-shrink: 0;
+}
+
+.repeat-badge {
+  display: inline-flex;
+  align-items: center;
+  font-size: 0.68rem;
+  font-weight: 800;
+  color: #0F766E;
+  background: #CCFBF1;
+  padding: 1px 6px;
+  border-radius: 4px;
+  flex-shrink: 0;
+}
+
+.live-tracker-subrow {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 6px;
+}
+
+.live-tracker-subrow input[type="text"] {
+  padding: 8px 10px;
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-sm);
+  font-size: 0.84rem;
+}
+
 /* ==================== 토스트 알림 ==================== */
 .toast-container {
   position: fixed;

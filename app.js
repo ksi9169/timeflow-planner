@@ -120,6 +120,102 @@
     return `${prefix}_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 7)}`;
   }
 
+  function cleanProjectTag(rawTag) {
+    return String(rawTag || '')
+      .replace(/^[#@]+/, '')
+      .trim();
+  }
+
+  function getRepeatLabelKo(repeat, baseDateStr = '') {
+    if (!repeat || repeat === 'none') return '';
+    if (repeat === 'daily') return '🔁 매일';
+    if (repeat === 'weekdays') return '🔁 평일';
+    if (repeat === 'weekly') {
+      if (baseDateStr && baseDateStr.includes('-')) {
+        const [y, m, d] = baseDateStr.split('-').map(Number);
+        const dayNames = ['일', '월', '화', '수', '목', '금', '토'];
+        const dow = new Date(y, m - 1, d).getDay();
+        return `🔁 매주 ${dayNames[dow]}요일`;
+      }
+      return '🔁 매주';
+    }
+    if (repeat === 'monthly') {
+      if (baseDateStr && baseDateStr.includes('-')) {
+        const dayNum = Number(baseDateStr.split('-')[2]);
+        return `🔁 매월 ${dayNum}일`;
+      }
+      return '🔁 매월';
+    }
+    return '';
+  }
+
+  function doesItemOccurOnDate(item, targetDateStr, isTodo = false) {
+    if (!item || !targetDateStr) return false;
+    const baseDate = isTodo ? item.dueDate : item.date;
+    const repeat = item.repeat || 'none';
+    if (repeat === 'none') {
+      return baseDate === targetDateStr;
+    }
+
+    const [ty, tm, td] = targetDateStr.split('-').map(Number);
+    if (!ty || !tm || !td) return false;
+    const targetDt = new Date(ty, tm - 1, td);
+    const dow = targetDt.getDay();
+
+    if (repeat === 'daily') return true;
+    if (repeat === 'weekdays') return dow >= 1 && dow <= 5;
+    if (repeat === 'weekly') {
+      if (!baseDate || !baseDate.includes('-')) return dow === 1;
+      const [by, bm, bd] = baseDate.split('-').map(Number);
+      const baseDow = new Date(by, bm - 1, bd).getDay();
+      return dow === baseDow;
+    }
+    if (repeat === 'monthly') {
+      if (!baseDate || !baseDate.includes('-')) return td === 1;
+      const bd = Number(baseDate.split('-')[2]);
+      return td === bd;
+    }
+    return baseDate === targetDateStr;
+  }
+
+  function isItemCompletedOnDate(item, dateStr) {
+    if (!item) return false;
+    const repeat = item.repeat || 'none';
+    if (repeat !== 'none') {
+      const target = dateStr || getTodayStr();
+      return Array.isArray(item.completedDates) && item.completedDates.includes(target);
+    }
+    return Boolean(item.completed);
+  }
+
+  function setItemCompletedOnDate(item, dateStr, checked) {
+    if (!item) return;
+    const repeat = item.repeat || 'none';
+    if (repeat !== 'none') {
+      const target = dateStr || getTodayStr();
+      if (!Array.isArray(item.completedDates)) item.completedDates = [];
+      if (checked) {
+        if (!item.completedDates.includes(target)) item.completedDates.push(target);
+      } else {
+        item.completedDates = item.completedDates.filter(d => d !== target);
+      }
+    } else {
+      item.completed = Boolean(checked);
+    }
+  }
+
+  function getNextOccurrenceDateStr(item, fromDateStr, isTodo = false) {
+    const baseDate = isTodo ? item.dueDate : item.date;
+    const repeat = item.repeat || 'none';
+    if (repeat === 'none') return baseDate || fromDateStr;
+    const startRef = fromDateStr || getTodayStr();
+    for (let i = 0; i < 35; i++) {
+      const cand = addDaysStr(startRef, i);
+      if (doesItemOccurOnDate(item, cand, isTodo)) return cand;
+    }
+    return baseDate || startRef;
+  }
+
   // -------------------- 초기 기본 상태 생성 --------------------
   function createInitialState() {
     const today = getTodayStr();
@@ -130,7 +226,9 @@
       settings: {
         ttsEnabled: true,
         syncCode: '',
-        streakDays: 3
+        streakDays: 3,
+        weeklyMonthlySeeded: true,
+        projectTagSeeded: true
       },
       categories: [
         { id: 'cat_work', name: '업무 · 프로젝트', color: '#4F46E5' },
@@ -148,6 +246,9 @@
           startTime: '07:00',
           endTime: '07:30',
           categoryId: 'cat_routine',
+          projectTag: '',
+          repeat: 'daily',
+          completedDates: [today, yesterday],
           alarm: true,
           important: false,
           completed: true
@@ -159,17 +260,35 @@
           startTime: '09:00',
           endTime: '11:00',
           categoryId: 'cat_work',
+          projectTag: '신규런칭',
+          repeat: 'none',
           alarm: true,
           important: true,
           completed: true
         },
         {
           id: 'sch_3',
-          title: '자료 리서치 및 오후 미팅 준비',
+          title: '자료 리서치 및 오후 정기 회의 준비',
           date: today,
           startTime: '14:00',
           endTime: '15:30',
           categoryId: 'cat_work',
+          projectTag: '신규런칭',
+          repeat: 'none',
+          alarm: true,
+          important: true,
+          completed: false
+        },
+        {
+          id: 'sch_wk_meeting',
+          title: '신규 서비스 주간 진행 점검 회의',
+          date: today,
+          startTime: '16:00',
+          endTime: '17:00',
+          categoryId: 'cat_work',
+          projectTag: '신규런칭',
+          repeat: 'weekly',
+          completedDates: [],
           alarm: true,
           important: true,
           completed: false
@@ -181,6 +300,8 @@
           startTime: '19:00',
           endTime: '20:00',
           categoryId: 'cat_health',
+          projectTag: '',
+          repeat: 'none',
           alarm: true,
           important: false,
           completed: false
@@ -192,17 +313,22 @@
           startTime: '21:00',
           endTime: '22:00',
           categoryId: 'cat_study',
+          projectTag: '역량강화',
+          repeat: 'none',
           alarm: true,
           important: true,
           completed: false
         },
         {
           id: 'sch_6',
-          title: '주간 업무 점검 회의',
+          title: '주간 안내 공지 및 일정 브리핑',
           date: tomorrow,
           startTime: '10:00',
-          endTime: '11:30',
+          endTime: '11:00',
           categoryId: 'cat_work',
+          projectTag: '정기안내',
+          repeat: 'weekly',
+          completedDates: [],
           alarm: true,
           important: true,
           completed: false
@@ -214,6 +340,9 @@
           startTime: '20:00',
           endTime: '21:30',
           categoryId: 'cat_study',
+          projectTag: '역량강화',
+          repeat: 'weekly',
+          completedDates: [],
           alarm: true,
           important: true,
           completed: false
@@ -225,6 +354,8 @@
           startTime: '14:00',
           endTime: '16:00',
           categoryId: 'cat_work',
+          projectTag: '신규런칭',
+          repeat: 'none',
           alarm: true,
           important: true,
           completed: false
@@ -236,6 +367,9 @@
           startTime: '10:00',
           endTime: '11:30',
           categoryId: 'cat_health',
+          projectTag: '',
+          repeat: 'weekly',
+          completedDates: [],
           alarm: false,
           important: false,
           completed: false
@@ -247,6 +381,8 @@
           startTime: '09:30',
           endTime: '12:00',
           categoryId: 'cat_work',
+          projectTag: '정기안내',
+          repeat: 'none',
           alarm: false,
           important: false,
           completed: true
@@ -259,7 +395,8 @@
           date: today,
           startTime: '07:00',
           endTime: '07:25',
-          categoryId: 'cat_routine'
+          categoryId: 'cat_routine',
+          projectTag: ''
         },
         {
           id: 'act_2',
@@ -267,7 +404,8 @@
           date: today,
           startTime: '09:00',
           endTime: '11:20',
-          categoryId: 'cat_work'
+          categoryId: 'cat_work',
+          projectTag: '신규런칭'
         },
         {
           id: 'act_3',
@@ -275,7 +413,8 @@
           date: today,
           startTime: '12:00',
           endTime: '13:00',
-          categoryId: 'cat_rest'
+          categoryId: 'cat_rest',
+          projectTag: ''
         },
         {
           id: 'act_y1',
@@ -283,7 +422,8 @@
           date: yesterday,
           startTime: '09:30',
           endTime: '12:00',
-          categoryId: 'cat_work'
+          categoryId: 'cat_work',
+          projectTag: '정기안내'
         },
         {
           id: 'act_y2',
@@ -291,15 +431,42 @@
           date: yesterday,
           startTime: '20:00',
           endTime: '21:30',
-          categoryId: 'cat_study'
+          categoryId: 'cat_study',
+          projectTag: '역량강화'
         }
       ],
       todos: [
+        {
+          id: 'todo_wk_notice',
+          title: '매주 정기 안내문 작성 및 공지 발송',
+          dueDate: today,
+          categoryId: 'cat_work',
+          projectTag: '정기안내',
+          repeat: 'weekly',
+          completedDates: [],
+          estimatedMinutes: 25,
+          important: true,
+          completed: false
+        },
+        {
+          id: 'todo_wk_sync',
+          title: '주간 회의록 공유 및 후속 액션 점검',
+          dueDate: today,
+          categoryId: 'cat_work',
+          projectTag: '신규런칭',
+          repeat: 'weekly',
+          completedDates: [],
+          estimatedMinutes: 30,
+          important: true,
+          completed: false
+        },
         {
           id: 'todo_1',
           title: '이번 달 타임트래커 점검 및 예산 확인',
           dueDate: today,
           categoryId: 'cat_study',
+          projectTag: '역량강화',
+          repeat: 'none',
           estimatedMinutes: 30,
           important: true,
           completed: false
@@ -309,6 +476,8 @@
           title: '운동화 세탁 맡기기',
           dueDate: today,
           categoryId: 'cat_routine',
+          projectTag: '',
+          repeat: 'none',
           estimatedMinutes: 20,
           important: false,
           completed: false
@@ -318,6 +487,8 @@
           title: '기획안 최종본 제출 마감',
           dueDate: tomorrow,
           categoryId: 'cat_work',
+          projectTag: '신규런칭',
+          repeat: 'none',
           estimatedMinutes: 60,
           important: true,
           completed: false
@@ -327,6 +498,9 @@
           title: '직무 자격증 모의고사 풀이 마감',
           dueDate: addDaysStr(today, 3),
           categoryId: 'cat_study',
+          projectTag: '역량강화',
+          repeat: 'weekly',
+          completedDates: [],
           estimatedMinutes: 50,
           important: true,
           completed: false
@@ -336,6 +510,9 @@
           title: '월간 지출 정산 및 영수증 정리',
           dueDate: addDaysStr(today, 6),
           categoryId: 'cat_routine',
+          projectTag: '정기안내',
+          repeat: 'monthly',
+          completedDates: [],
           estimatedMinutes: 30,
           important: false,
           completed: false
@@ -345,6 +522,8 @@
           title: '다음 분기 읽을 책 리스트 정리',
           dueDate: '',
           categoryId: 'cat_study',
+          projectTag: '역량강화',
+          repeat: 'none',
           estimatedMinutes: 30,
           important: false,
           completed: false
@@ -354,6 +533,8 @@
           title: '책상 선정리 및 데스크 셋업 정돈',
           dueDate: '',
           categoryId: 'cat_etc',
+          projectTag: '',
+          repeat: 'none',
           estimatedMinutes: 45,
           important: false,
           completed: false
@@ -445,12 +626,15 @@
 
   let currentTodoFilter = 'today';
   let currentReportPeriod = 'thisMonth';
+  let selectedProjectTag = '';
+  let todoGroupByTag = true;
 
   // 실시간 타임트래커 스톱워치 상태
   let liveTracker = {
     running: false,
     title: '',
     categoryId: 'cat_work',
+    projectTag: '',
     startTimestamp: null,
     startTimeStr: '',
     elapsedSeconds: 0,
@@ -491,10 +675,27 @@
         reviewNotes: { ...fallback.reviewNotes, ...(parsed.reviewNotes || {}) },
         timeBudgets: { ...fallback.timeBudgets, ...(parsed.timeBudgets || {}) }
       };
-      if (!merged.settings.weeklyMonthlySeeded) {
+      if (!merged.settings.weeklyMonthlySeeded || !merged.settings.projectTagSeeded) {
+        const fallbackSchMap = new Map(fallback.schedules.map(fs => [fs.id, fs]));
+        merged.schedules.forEach(s => {
+          const ref = fallbackSchMap.get(s.id);
+          if (ref) {
+            if (!s.projectTag && ref.projectTag) s.projectTag = ref.projectTag;
+            if (!s.repeat && ref.repeat) s.repeat = ref.repeat;
+          }
+        });
         fallback.schedules.forEach(fs => {
           if (!merged.schedules.some(s => s.id === fs.id)) {
             merged.schedules.push(fs);
+          }
+        });
+
+        const fallbackTodoMap = new Map(fallback.todos.map(ft => [ft.id, ft]));
+        merged.todos.forEach(t => {
+          const ref = fallbackTodoMap.get(t.id);
+          if (ref) {
+            if (!t.projectTag && ref.projectTag) t.projectTag = ref.projectTag;
+            if (!t.repeat && ref.repeat) t.repeat = ref.repeat;
           }
         });
         fallback.todos.forEach(ft => {
@@ -502,7 +703,17 @@
             merged.todos.push(ft);
           }
         });
+
+        const fallbackActMap = new Map(fallback.actualLogs.map(fa => [fa.id, fa]));
+        merged.actualLogs.forEach(a => {
+          const ref = fallbackActMap.get(a.id);
+          if (ref && !a.projectTag && ref.projectTag) {
+            a.projectTag = ref.projectTag;
+          }
+        });
+
         merged.settings.weeklyMonthlySeeded = true;
+        merged.settings.projectTagSeeded = true;
       }
       return merged;
     } catch (_) {
@@ -649,6 +860,55 @@
       text = text.replace(/!중요|!필수|★/g, '').trim();
     }
 
+    // 프로젝트 태그 추출 (@신규런칭 등)
+    let projectTag =
+      selectedProjectTag && selectedProjectTag !== '__UNTAGGED__' ? selectedProjectTag : '';
+    const atMatch = text.match(/@([^\s#,]+)/);
+    if (atMatch) {
+      projectTag = cleanProjectTag(atMatch[1]);
+      text = text.replace(atMatch[0], '').trim();
+    }
+
+    // 반복 주기 추출 (매주 수요일, 매주, 매일, 평일, 매월)
+    let repeat = 'none';
+    const korDayMap = { 일: 0, 월: 1, 화: 2, 수: 3, 목: 4, 금: 5, 토: 6 };
+    const weeklyDayMatch = text.match(/매주\s*([일월화수목금토])요일|([일월화수목금토])요일마다/);
+    if (weeklyDayMatch) {
+      repeat = 'weekly';
+      const dayChar = weeklyDayMatch[1] || weeklyDayMatch[2];
+      const targetDow = korDayMap[dayChar];
+      if (targetDow !== undefined) {
+        const weekInfo = getWeekRangeFromDateStr(selectedDate);
+        const matchedDayObj = weekInfo.days.find(d => d.dayIdx === targetDow);
+        if (matchedDayObj) dateStr = matchedDayObj.dateStr;
+      }
+      text = text.replace(weeklyDayMatch[0], '').trim();
+    } else if (/매주|주간마다/.test(text)) {
+      repeat = 'weekly';
+      text = text.replace(/매주|주간마다/g, '').trim();
+    } else if (/매일|날마다/.test(text)) {
+      repeat = 'daily';
+      text = text.replace(/매일|날마다/g, '').trim();
+    } else if (/평일마다|평일/.test(text)) {
+      repeat = 'weekdays';
+      text = text.replace(/평일마다|평일/g, '').trim();
+    } else if (/매월|매달/.test(text)) {
+      repeat = 'monthly';
+      text = text.replace(/매월|매달/g, '').trim();
+    } else {
+      // 단독 요일 지정 (예: 수요일 14시 회의)
+      const singleDowMatch = text.match(/\b([일월화수목금토])요일\b/);
+      if (singleDowMatch) {
+        const targetDow = korDayMap[singleDowMatch[1]];
+        if (targetDow !== undefined) {
+          const weekInfo = getWeekRangeFromDateStr(selectedDate);
+          const matchedDayObj = weekInfo.days.find(d => d.dayIdx === targetDow);
+          if (matchedDayObj) dateStr = matchedDayObj.dateStr;
+        }
+        text = text.replace(singleDowMatch[0], '').trim();
+      }
+    }
+
     // 카테고리 태그 추출 (#업무 등)
     let categoryId = defaultCategoryId || (state.categories[0] && state.categories[0].id) || 'cat_work';
     const hashMatch = text.match(/#([^\s]+)/);
@@ -740,8 +1000,104 @@
       startTime,
       endTime,
       categoryId,
+      projectTag,
+      repeat: resolvedType === 'actual' ? 'none' : repeat,
       important
     };
+  }
+
+  function getAllProjectTags() {
+    const tagSet = new Set();
+    state.schedules.forEach(s => {
+      const t = cleanProjectTag(s.projectTag);
+      if (t) tagSet.add(t);
+    });
+    state.todos.forEach(td => {
+      const t = cleanProjectTag(td.projectTag);
+      if (t) tagSet.add(t);
+    });
+    state.actualLogs.forEach(a => {
+      const t = cleanProjectTag(a.projectTag);
+      if (t) tagSet.add(t);
+    });
+    return Array.from(tagSet);
+  }
+
+  function matchesSelectedProjectTag(item) {
+    if (!selectedProjectTag) return true;
+    const itemTag = cleanProjectTag(item?.projectTag);
+    if (selectedProjectTag === '__UNTAGGED__') return !itemTag;
+    return itemTag === selectedProjectTag;
+  }
+
+  function renderProjectTagFilterBar() {
+    const chipsContainer = document.getElementById('projectTagFilterChips');
+    const summaryEl = document.getElementById('projectTagActiveSummary');
+    const datalistEl = document.getElementById('projectTagDatalist');
+    const tags = getAllProjectTags();
+
+    if (selectedProjectTag && selectedProjectTag !== '__UNTAGGED__' && !tags.includes(selectedProjectTag)) {
+      selectedProjectTag = '';
+    }
+
+    if (datalistEl) {
+      datalistEl.innerHTML = tags.map(t => `<option value="${escapeHtml(t)}"></option>`).join('');
+    }
+
+    if (!chipsContainer) return;
+
+    const allTotalCount = state.schedules.length + state.todos.length;
+    let chipsHtml = `
+      <button type="button" class="ptag-chip ${!selectedProjectTag ? 'active' : ''}" data-ptag="">
+        <span>전체 보기</span>
+        <span class="ptag-chip-count">${allTotalCount}</span>
+      </button>
+    `;
+
+    tags.forEach(tag => {
+      const schCount = state.schedules.filter(s => cleanProjectTag(s.projectTag) === tag).length;
+      const todoCount = state.todos.filter(t => cleanProjectTag(t.projectTag) === tag).length;
+      const count = schCount + todoCount;
+      const isActive = selectedProjectTag === tag;
+      chipsHtml += `
+        <button type="button" class="ptag-chip ${isActive ? 'active' : ''}" data-ptag="${escapeHtml(tag)}">
+          <span>@${escapeHtml(tag)}</span>
+          <span class="ptag-chip-count">${count}</span>
+        </button>
+      `;
+    });
+
+    chipsHtml += `
+      <button type="button" class="ptag-chip ${selectedProjectTag === '__UNTAGGED__' ? 'active' : ''}" data-ptag="__UNTAGGED__">
+        <span>태그 미지정</span>
+      </button>
+    `;
+
+    chipsContainer.innerHTML = chipsHtml;
+
+    chipsContainer.querySelectorAll('.ptag-chip').forEach(btn => {
+      btn.addEventListener('click', () => {
+        selectedProjectTag = btn.dataset.ptag || '';
+        renderAll();
+      });
+    });
+
+    if (summaryEl) {
+      if (!selectedProjectTag) {
+        summaryEl.textContent = `활성 프로젝트 태그 ${tags.length}개 · 태그를 누르면 해당 프로젝트의 정기 일정·할 일·투입 시간만 모아 봅니다`;
+      } else if (selectedProjectTag === '__UNTAGGED__') {
+        summaryEl.textContent = '프로젝트 태그가 지정되지 않은 일반 일정과 할 일만 표시 중입니다';
+      } else {
+        const tagSchedules = state.schedules.filter(s => cleanProjectTag(s.projectTag) === selectedProjectTag);
+        const recurringCnt = tagSchedules.filter(s => s.repeat && s.repeat !== 'none').length;
+        const tagTodos = state.todos.filter(t => cleanProjectTag(t.projectTag) === selectedProjectTag);
+        const doneTodos = tagTodos.filter(t => isItemCompletedOnDate(t, selectedDate)).length;
+        const tagActualMins = state.actualLogs
+          .filter(a => cleanProjectTag(a.projectTag) === selectedProjectTag)
+          .reduce((acc, a) => acc + durationMinutes(a.startTime, a.endTime), 0);
+        summaryEl.textContent = `@${selectedProjectTag} · 일정 ${tagSchedules.length}건 · 정기 반복 ${recurringCnt}건 · 할 일 완료 ${doneTodos}/${tagTodos.length} · 누적 투입 ${formatDurationKo(tagActualMins)}`;
+      }
+    }
   }
 
   function syncCalCursorsToSelectedDate(syncFullCal = false) {
@@ -757,6 +1113,7 @@
   function renderAll() {
     renderHeaderDate();
     renderCategorySelects();
+    renderProjectTagFilterBar();
     renderKPIs();
     renderMiniCalendar();
     renderTodoList();
@@ -811,12 +1168,16 @@
 
   // -------------------- KPI 4종 렌더링 --------------------
   function renderKPIs() {
-    const daySchedules = state.schedules.filter(s => s.date === selectedDate);
-    const dayTodos = state.todos.filter(t => t.dueDate === selectedDate);
+    const daySchedules = state.schedules.filter(
+      s => matchesSelectedProjectTag(s) && doesItemOccurOnDate(s, selectedDate, false)
+    );
+    const dayTodos = state.todos.filter(
+      t => matchesSelectedProjectTag(t) && doesItemOccurOnDate(t, selectedDate, true)
+    );
     const totalPlannedItems = daySchedules.length + dayTodos.length;
     const completedItems =
-      daySchedules.filter(s => s.completed).length +
-      dayTodos.filter(t => t.completed).length;
+      daySchedules.filter(s => isItemCompletedOnDate(s, selectedDate)).length +
+      dayTodos.filter(t => isItemCompletedOnDate(t, selectedDate)).length;
 
     const rate = totalPlannedItems > 0 ? Math.round((completedItems / totalPlannedItems) * 100) : 0;
 
@@ -826,7 +1187,9 @@
     document.getElementById('kpiPlanBadge').textContent = rate >= 80 ? '순항 중' : rate >= 40 ? '진행 중' : '시작 단계';
 
     // 실제 기록 시간 vs 계획 시간
-    const dayActuals = state.actualLogs.filter(a => a.date === selectedDate);
+    const dayActuals = state.actualLogs.filter(
+      a => matchesSelectedProjectTag(a) && a.date === selectedDate
+    );
     const actualMins = dayActuals.reduce((acc, cur) => acc + durationMinutes(cur.startTime, cur.endTime), 0);
     const planMins = daySchedules.reduce((acc, cur) => acc + durationMinutes(cur.startTime, cur.endTime), 0);
     const actualRatio = planMins > 0 ? Math.min(100, Math.round((actualMins / planMins) * 100)) : (actualMins > 0 ? 100 : 0);
@@ -849,7 +1212,7 @@
     const nowMins = timeToMinutes(getNowTimeStr());
     const upcomingAlarms = [
       ...daySchedules
-        .filter(s => s.alarm && !s.completed && timeToMinutes(s.startTime) >= nowMins)
+        .filter(s => s.alarm && !isItemCompletedOnDate(s, selectedDate) && timeToMinutes(s.startTime) >= nowMins)
         .map(s => ({ time: s.startTime, title: s.title })),
       ...state.routines
         .filter(r => r.alarm && !r.completedDates?.includes(selectedDate) && timeToMinutes(r.startTime) >= nowMins)
@@ -903,8 +1266,12 @@
       if (cell.dateStr === todayStr) btn.classList.add('is-today');
       if (cell.dateStr === selectedDate) btn.classList.add('is-selected');
 
-      const hasPlan = state.schedules.some(s => s.date === cell.dateStr);
-      const hasActual = state.actualLogs.some(a => a.date === cell.dateStr);
+      const hasPlan = state.schedules.some(
+        s => matchesSelectedProjectTag(s) && doesItemOccurOnDate(s, cell.dateStr, false)
+      );
+      const hasActual = state.actualLogs.some(
+        a => matchesSelectedProjectTag(a) && a.date === cell.dateStr
+      );
 
       btn.innerHTML = `
         <span>${cell.day}</span>
@@ -922,66 +1289,252 @@
     });
   }
 
-  // -------------------- 할 일 및 백로그 목록 렌더링 --------------------
+  // -------------------- 할 일 및 프로젝트 태그 묶음 렌더링 --------------------
+  function createTodoCardElement(todo) {
+    const cat = getCategoryById(todo.categoryId);
+    const isDone = isItemCompletedOnDate(todo, selectedDate);
+    const pTag = cleanProjectTag(todo.projectTag);
+    const repeatLabel = getRepeatLabelKo(todo.repeat, todo.dueDate);
+
+    const card = document.createElement('div');
+    card.className = `todo-item-card ${isDone ? 'completed' : ''}`;
+    card.innerHTML = `
+      <div class="todo-left">
+        <input type="checkbox" class="todo-check" ${isDone ? 'checked' : ''} aria-label="완료 체크" />
+        <div class="todo-meta-col">
+          <div class="todo-title-row">
+            ${todo.important ? '<span class="important-star" title="중요 항목">★</span>' : ''}
+            <span class="todo-title-text">${escapeHtml(todo.title)}</span>
+          </div>
+          <div class="todo-sub-info">
+            ${pTag ? `<span class="project-tag-pill">@${escapeHtml(pTag)}</span>` : ''}
+            ${repeatLabel ? `<span class="repeat-badge">${escapeHtml(repeatLabel)}</span>` : ''}
+            <span class="cat-dot-tag" style="background:${cat.color}20;color:${cat.color}">${escapeHtml(cat.name)}</span>
+            <span>${
+              todo.repeat && todo.repeat !== 'none'
+                ? doesItemOccurOnDate(todo, selectedDate, true)
+                  ? '오늘 해당'
+                  : `다음: ${getNextOccurrenceDateStr(todo, selectedDate, true)}`
+                : todo.dueDate
+                ? `마감: ${todo.dueDate}`
+                : '날짜 미정'
+            }</span>
+          </div>
+        </div>
+      </div>
+      <div class="todo-actions">
+        <button type="button" class="btn-xs btn-teal todo-start-btn" title="이 할 일의 실시간 타임트래커 측정을 바로 시작합니다">타이머 시작</button>
+        <button type="button" class="btn-xs btn-ghost todo-edit-btn">편집</button>
+      </div>
+    `;
+
+    card.querySelector('.todo-check').addEventListener('change', e => {
+      setItemCompletedOnDate(todo, selectedDate, e.target.checked);
+      saveState();
+      renderAll();
+    });
+
+    card.querySelector('.todo-start-btn').addEventListener('click', () => {
+      startLiveTrackerWith(todo.title, todo.categoryId, pTag);
+    });
+
+    card.querySelector('.todo-edit-btn').addEventListener('click', () => {
+      openItemModalForEdit('todo', todo);
+    });
+
+    return card;
+  }
+
   function renderTodoList() {
     const container = document.getElementById('todoListContainer');
+    const groupBtn = document.getElementById('toggleTodoGroupByTagBtn');
     if (!container) return;
 
-    let filtered = [];
-    if (currentTodoFilter === 'today') {
-      filtered = state.todos.filter(t => !t.completed && (t.dueDate === selectedDate || !t.dueDate));
-    } else if (currentTodoFilter === 'backlog') {
-      filtered = state.todos.filter(t => !t.completed && !t.dueDate);
-    } else {
-      filtered = state.todos.filter(t => t.completed);
+    if (groupBtn) {
+      groupBtn.classList.toggle('active', todoGroupByTag);
     }
 
-    if (filtered.length === 0) {
-      container.innerHTML = `<p class="empty-guide">표시할 할 일 항목이 없습니다.</p>`;
-      return;
+    const baseTodos = state.todos.filter(t => matchesSelectedProjectTag(t));
+    let filtered = [];
+
+    if (currentTodoFilter === 'today') {
+      filtered = baseTodos.filter(t => {
+        const isDone = isItemCompletedOnDate(t, selectedDate);
+        if (isDone) return false;
+        if (t.repeat && t.repeat !== 'none') {
+          return true;
+        }
+        return t.dueDate === selectedDate || !t.dueDate;
+      });
+    } else if (currentTodoFilter === 'recurring') {
+      filtered = baseTodos.filter(t => t.repeat && t.repeat !== 'none');
+    } else if (currentTodoFilter === 'backlog') {
+      filtered = baseTodos.filter(
+        t => !isItemCompletedOnDate(t, selectedDate) && !t.dueDate && (!t.repeat || t.repeat === 'none')
+      );
+    } else {
+      filtered = baseTodos.filter(t => isItemCompletedOnDate(t, selectedDate));
     }
 
     container.innerHTML = '';
+
+    // 태그별 묶음 모드가 꺼져 있는 경우
+    if (!todoGroupByTag) {
+      if (filtered.length === 0) {
+        container.innerHTML = `<p class="empty-guide">표시할 할 일 항목이 없습니다.</p>`;
+        return;
+      }
+      filtered.forEach(todo => {
+        container.appendChild(createTodoCardElement(todo));
+      });
+      return;
+    }
+
+    // 태그별 묶음 모드가 켜져 있는 경우: 프로젝트 태그별로 할 일과 정기 일정을 함께 묶어서 표시
+    const tagGroups = new Map();
+    const allTags = getAllProjectTags().filter(tag => {
+      if (!selectedProjectTag) return true;
+      if (selectedProjectTag === '__UNTAGGED__') return false;
+      return tag === selectedProjectTag;
+    });
+
+    allTags.forEach(tag => {
+      tagGroups.set(tag, []);
+    });
+
+    const untaggedTodos = [];
     filtered.forEach(todo => {
-      const cat = getCategoryById(todo.categoryId);
-      const card = document.createElement('div');
-      card.className = `todo-item-card ${todo.completed ? 'completed' : ''}`;
-      card.innerHTML = `
-        <div class="todo-left">
-          <input type="checkbox" class="todo-check" ${todo.completed ? 'checked' : ''} aria-label="완료 체크" />
-          <div class="todo-meta-col">
-            <div class="todo-title-row">
-              ${todo.important ? '<span class="important-star" title="중요 항목">★</span>' : ''}
-              <span class="todo-title-text">${escapeHtml(todo.title)}</span>
-            </div>
-            <div class="todo-sub-info">
-              <span class="cat-dot-tag" style="background:${cat.color}20;color:${cat.color}">${escapeHtml(cat.name)}</span>
-              <span>${todo.dueDate ? `마감: ${todo.dueDate}` : '날짜 미정 보관함'}</span>
-            </div>
-          </div>
+      const tag = cleanProjectTag(todo.projectTag);
+      if (tag) {
+        if (!tagGroups.has(tag)) tagGroups.set(tag, []);
+        tagGroups.get(tag).push(todo);
+      } else {
+        untaggedTodos.push(todo);
+      }
+    });
+
+    let renderedGroups = 0;
+
+    tagGroups.forEach((groupTodos, tag) => {
+      // 이 프로젝트 태그에 속한 정기 반복 일정 또는 오늘/예정 일정도 함께 확인
+      const tagSchedules = state.schedules.filter(s => {
+        if (cleanProjectTag(s.projectTag) !== tag) return false;
+        if (currentTodoFilter === 'recurring') return s.repeat && s.repeat !== 'none';
+        if (currentTodoFilter === 'done') return isItemCompletedOnDate(s, selectedDate);
+        return (s.repeat && s.repeat !== 'none') || doesItemOccurOnDate(s, selectedDate, false);
+      });
+
+      if (groupTodos.length === 0 && tagSchedules.length === 0) return;
+      renderedGroups++;
+
+      const allTagTodos = state.todos.filter(t => cleanProjectTag(t.projectTag) === tag);
+      const doneTagTodos = allTagTodos.filter(t => isItemCompletedOnDate(t, selectedDate)).length;
+      const tagActualMins = state.actualLogs
+        .filter(a => cleanProjectTag(a.projectTag) === tag)
+        .reduce((acc, a) => acc + durationMinutes(a.startTime, a.endTime), 0);
+
+      const block = document.createElement('div');
+      block.className = 'project-group-block';
+
+      const head = document.createElement('div');
+      head.className = 'project-group-head';
+      head.innerHTML = `
+        <div class="pg-head-left">
+          <span class="pg-tag-badge">@${escapeHtml(tag)}</span>
+          <span class="pg-meta-stats">할 일 ${doneTagTodos}/${allTagTodos.length}${tagActualMins > 0 ? ` · 투입 ${formatDurationKo(tagActualMins)}` : ''}</span>
         </div>
-        <div class="todo-actions">
-          <button type="button" class="btn-xs btn-teal todo-start-btn" title="이 할 일의 실시간 타임트래커 측정을 바로 시작합니다">타이머 시작</button>
-          <button type="button" class="btn-xs btn-ghost todo-edit-btn">편집</button>
+        <div class="pg-head-right">
+          <button type="button" class="pg-quick-add-btn pg-add-todo-btn" title="이 프로젝트 태그로 할 일 추가">+ 할 일</button>
+          <button type="button" class="pg-quick-add-btn pg-add-sch-btn" title="이 프로젝트 태그로 정기·일반 일정 추가">+ 일정</button>
         </div>
       `;
 
-      card.querySelector('.todo-check').addEventListener('change', e => {
-        todo.completed = e.target.checked;
-        saveState();
-        renderAll();
+      head.querySelector('.pg-add-todo-btn').addEventListener('click', () => {
+        openItemModalForCreate('todo', '09:00', '10:00', tag);
+      });
+      head.querySelector('.pg-add-sch-btn').addEventListener('click', () => {
+        openItemModalForCreate('schedule', '10:00', '11:00', tag, 'weekly');
       });
 
-      card.querySelector('.todo-start-btn').addEventListener('click', () => {
-        startLiveTrackerWith(todo.title, todo.categoryId);
+      block.appendChild(head);
+
+      const body = document.createElement('div');
+      body.className = 'pg-body-items';
+
+      // 프로젝트 소속 정기 일정(매주 안내, 정기 회의 등) 미니 리스트 표시
+      if (tagSchedules.length > 0 && currentTodoFilter !== 'backlog') {
+        const schList = document.createElement('div');
+        schList.className = 'pg-schedule-mini-list';
+        tagSchedules.forEach(sch => {
+          const repLabel = getRepeatLabelKo(sch.repeat, sch.date);
+          const isSchDone = isItemCompletedOnDate(sch, selectedDate);
+          const sItem = document.createElement('div');
+          sItem.className = 'pg-schedule-mini-item';
+          sItem.innerHTML = `
+            <div style="display:flex;align-items:center;gap:6px;min-width:0;">
+              <input type="checkbox" class="pg-sch-check" ${isSchDone ? 'checked' : ''} title="일정 완료 체크" />
+              ${repLabel ? `<span class="repeat-badge">${escapeHtml(repLabel)}</span>` : '<span class="wk-type-tag plan">일정</span>'}
+              <span style="font-weight:700;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;${isSchDone ? 'text-decoration:line-through;opacity:0.6;' : ''}">${escapeHtml(sch.title)}</span>
+            </div>
+            <span style="font-size:0.72rem;color:#4F46E5;font-weight:700;flex-shrink:0;">${sch.startTime}</span>
+          `;
+          sItem.querySelector('.pg-sch-check').addEventListener('click', e => {
+            e.stopPropagation();
+            setItemCompletedOnDate(sch, selectedDate, e.target.checked);
+            saveState();
+            renderAll();
+          });
+          sItem.addEventListener('click', e => {
+            if (e.target.classList.contains('pg-sch-check')) return;
+            openItemModalForEdit('schedule', sch);
+          });
+          schList.appendChild(sItem);
+        });
+        body.appendChild(schList);
+      }
+
+      groupTodos.forEach(todo => {
+        body.appendChild(createTodoCardElement(todo));
       });
 
-      card.querySelector('.todo-edit-btn').addEventListener('click', () => {
-        openItemModalForEdit('todo', todo);
-      });
-
-      container.appendChild(card);
+      block.appendChild(body);
+      container.appendChild(block);
     });
+
+    if (untaggedTodos.length > 0 && selectedProjectTag !== '__UNTAGGED__') {
+      renderedGroups++;
+      const block = document.createElement('div');
+      block.className = 'project-group-block';
+      block.innerHTML = `
+        <div class="project-group-head">
+          <div class="pg-head-left">
+            <span class="pg-tag-badge" style="background:#F1F5F9;color:#475569;">개별 할 일</span>
+            <span class="pg-meta-stats">${untaggedTodos.length}건</span>
+          </div>
+          <div class="pg-head-right">
+            <button type="button" class="pg-quick-add-btn pg-add-untagged-btn">+ 할 일</button>
+          </div>
+        </div>
+        <div class="pg-body-items"></div>
+      `;
+      block.querySelector('.pg-add-untagged-btn').addEventListener('click', () => {
+        openItemModalForCreate('todo', '09:00', '10:00', '');
+      });
+      const body = block.querySelector('.pg-body-items');
+      untaggedTodos.forEach(todo => {
+        body.appendChild(createTodoCardElement(todo));
+      });
+      container.appendChild(block);
+    } else if (selectedProjectTag === '__UNTAGGED__' && untaggedTodos.length > 0) {
+      renderedGroups++;
+      untaggedTodos.forEach(todo => {
+        container.appendChild(createTodoCardElement(todo));
+      });
+    }
+
+    if (renderedGroups === 0) {
+      container.innerHTML = `<p class="empty-guide">표시할 프로젝트 할 일이나 정기 과업이 없습니다.</p>`;
+    }
   }
 
   // -------------------- 중앙: 일별 · 주별 · 월별 통합 타임트래커 렌더링 --------------------
@@ -1078,11 +1631,11 @@
     headerActualCol.classList.toggle('hidden', !showActual);
 
     const dayPlans = state.schedules
-      .filter(s => s.date === selectedDate)
+      .filter(s => matchesSelectedProjectTag(s) && doesItemOccurOnDate(s, selectedDate, false))
       .sort((a, b) => timeToMinutes(a.startTime) - timeToMinutes(b.startTime));
 
     const dayActuals = state.actualLogs
-      .filter(a => a.date === selectedDate)
+      .filter(a => matchesSelectedProjectTag(a) && a.date === selectedDate)
       .sort((a, b) => timeToMinutes(a.startTime) - timeToMinutes(b.startTime));
 
     const totalPlanMins = dayPlans.reduce((s, x) => s + durationMinutes(x.startTime, x.endTime), 0);
@@ -1128,20 +1681,25 @@
         } else {
           plansInHour.forEach(p => {
             const cat = getCategoryById(p.categoryId);
+            const isPlanDone = isItemCompletedOnDate(p, selectedDate);
+            const pTag = cleanProjectTag(p.projectTag);
+            const repLabel = getRepeatLabelKo(p.repeat, p.date);
             const block = document.createElement('div');
-            block.className = `timeline-block ${p.completed ? 'is-completed-block' : ''}`;
+            block.className = `timeline-block ${isPlanDone ? 'is-completed-block' : ''}`;
             block.style.background = `${cat.color}16`;
             block.style.borderLeftColor = cat.color;
             block.innerHTML = `
               <div class="tb-info">
-                <span class="tb-time" style="color:${cat.color}">
-                  ${p.startTime} ~ ${p.endTime} ${p.alarm ? '🔔' : ''} ${p.important ? '★ 중요' : ''}
+                <span class="tb-time" style="color:${cat.color};display:flex;align-items:center;gap:4px;flex-wrap:wrap;">
+                  <span>${p.startTime} ~ ${p.endTime} ${p.alarm ? '🔔' : ''} ${p.important ? '★ 중요' : ''}</span>
+                  ${pTag ? `<span class="project-tag-pill">@${escapeHtml(pTag)}</span>` : ''}
+                  ${repLabel ? `<span class="repeat-badge">${escapeHtml(repLabel)}</span>` : ''}
                 </span>
                 <span class="tb-title">${escapeHtml(p.title)}</span>
               </div>
               <div class="tb-actions">
                 <button type="button" class="tb-mini-btn plan-run-btn" title="이 일정을 지금 시작하고 실제 시간을 측정합니다">시작</button>
-                <button type="button" class="tb-mini-btn plan-done-btn" title="계획 일정과 동일한 시간으로 실제 사용 시간에 즉시 기록합니다">${p.completed ? '완료됨' : '완료 기록'}</button>
+                <button type="button" class="tb-mini-btn plan-done-btn" title="계획 일정과 동일한 시간으로 실제 사용 시간에 즉시 기록합니다">${isPlanDone ? '완료됨' : '완료 기록'}</button>
               </div>
             `;
             block.addEventListener('click', e => {
@@ -1150,23 +1708,25 @@
             });
             block.querySelector('.plan-run-btn').addEventListener('click', e => {
               e.stopPropagation();
-              startLiveTrackerWith(p.title, p.categoryId);
+              startLiveTrackerWith(p.title, p.categoryId, pTag);
             });
             block.querySelector('.plan-done-btn').addEventListener('click', e => {
               e.stopPropagation();
-              p.completed = !p.completed;
-              if (p.completed) {
+              const nextState = !isItemCompletedOnDate(p, selectedDate);
+              setItemCompletedOnDate(p, selectedDate, nextState);
+              if (nextState) {
                 const exists = state.actualLogs.some(
-                  a => a.date === p.date && a.title === p.title && a.startTime === p.startTime
+                  a => a.date === selectedDate && a.title === p.title && a.startTime === p.startTime
                 );
                 if (!exists) {
                   state.actualLogs.push({
                     id: uid('act'),
                     title: p.title,
-                    date: p.date,
+                    date: selectedDate,
                     startTime: p.startTime,
                     endTime: p.endTime,
-                    categoryId: p.categoryId
+                    categoryId: p.categoryId,
+                    projectTag: pTag
                   });
                   showToast(`'${p.title}' 일정이 실제 진행 시간에 자동 기록되었습니다.`);
                 }
@@ -1193,13 +1753,17 @@
           actualsInHour.forEach(a => {
             const cat = getCategoryById(a.categoryId);
             const dur = durationMinutes(a.startTime, a.endTime);
+            const aTag = cleanProjectTag(a.projectTag);
             const block = document.createElement('div');
             block.className = 'timeline-block';
             block.style.background = `${cat.color}24`;
             block.style.borderLeftColor = cat.color;
             block.innerHTML = `
               <div class="tb-info">
-                <span class="tb-time" style="color:${cat.color}">${a.startTime} ~ ${a.endTime} · ${dur}분 진행</span>
+                <span class="tb-time" style="color:${cat.color};display:flex;align-items:center;gap:4px;flex-wrap:wrap;">
+                  <span>${a.startTime} ~ ${a.endTime} · ${dur}분 진행</span>
+                  ${aTag ? `<span class="project-tag-pill">@${escapeHtml(aTag)}</span>` : ''}
+                </span>
                 <span class="tb-title">${escapeHtml(a.title)}</span>
               </div>
               <div class="tb-actions">
@@ -1270,16 +1834,22 @@
   }
 
   // -------------------- 실시간 타임트래커 스톱워치 엔진 --------------------
-  function startLiveTrackerWith(title, categoryId) {
+  function startLiveTrackerWith(title, categoryId, projectTag = '') {
     if (liveTracker.running) {
       stopLiveTrackerAndRecord();
     }
 
     const titleInput = document.getElementById('liveTrackerTitle');
     const catSelect = document.getElementById('liveTrackerCategory');
+    const tagInput = document.getElementById('liveTrackerProjectTag');
 
     liveTracker.title = String(title || titleInput.value || '집중 작업').trim();
     liveTracker.categoryId = categoryId || catSelect.value || state.categories[0].id;
+    liveTracker.projectTag = cleanProjectTag(
+      projectTag ||
+        (tagInput && tagInput.value) ||
+        (selectedProjectTag && selectedProjectTag !== '__UNTAGGED__' ? selectedProjectTag : '')
+    );
     liveTracker.startTimestamp = Date.now();
     liveTracker.startTimeStr = getNowTimeStr();
     liveTracker.elapsedSeconds = 0;
@@ -1287,6 +1857,7 @@
 
     titleInput.value = liveTracker.title;
     catSelect.value = liveTracker.categoryId;
+    if (tagInput) tagInput.value = liveTracker.projectTag;
 
     document.getElementById('startLiveTrackerBtn').classList.add('hidden');
     document.getElementById('stopLiveTrackerBtn').classList.remove('hidden');
@@ -1328,6 +1899,8 @@
     const elapsedMins = Math.max(5, Math.round(liveTracker.elapsedSeconds / 60));
     const startTime = liveTracker.startTimeStr || getNowTimeStr();
     const endTime = minutesToTime(timeToMinutes(startTime) + elapsedMins);
+    const tagInput = document.getElementById('liveTrackerProjectTag');
+    const finalTag = cleanProjectTag((tagInput && tagInput.value) || liveTracker.projectTag);
 
     state.actualLogs.push({
       id: uid('act'),
@@ -1335,13 +1908,15 @@
       date: getTodayStr(),
       startTime,
       endTime,
-      categoryId: liveTracker.categoryId
+      categoryId: liveTracker.categoryId,
+      projectTag: finalTag
     });
 
     document.getElementById('startLiveTrackerBtn').classList.remove('hidden');
     document.getElementById('stopLiveTrackerBtn').classList.add('hidden');
     document.getElementById('liveTrackerClock').textContent = '00:00:00';
     document.getElementById('liveTrackerTitle').value = '';
+    if (tagInput) tagInput.value = '';
 
     const badge = document.getElementById('liveTrackerBadge');
     badge.textContent = '대기 중';
@@ -1731,9 +2306,9 @@
     const todayStr = getTodayStr();
     const ymPrefix = `${year}-${String(month + 1).padStart(2, '0')}`;
 
-    const impCount = state.schedules.filter(s => s.date.startsWith(ymPrefix) && s.important).length;
-    const regCount = state.schedules.filter(s => s.date.startsWith(ymPrefix) && !s.important).length;
-    const todoCount = state.todos.filter(t => t.dueDate && t.dueDate.startsWith(ymPrefix)).length;
+    let impCount = 0;
+    let regCount = 0;
+    let todoCount = 0;
 
     const cells = [];
     for (let i = firstDay - 1; i >= 0; i--) {
@@ -1761,20 +2336,30 @@
         .filter(Boolean)
         .join(' ');
 
-      const dayTodos = state.todos.filter(t => t.dueDate === cell.dateStr);
+      const dayTodos = state.todos.filter(
+        t => matchesSelectedProjectTag(t) && doesItemOccurOnDate(t, cell.dateStr, true)
+      );
       const daySchedules = state.schedules
-        .filter(s => s.date === cell.dateStr)
+        .filter(s => matchesSelectedProjectTag(s) && doesItemOccurOnDate(s, cell.dateStr, false))
         .sort((a, b) => timeToMinutes(a.startTime) - timeToMinutes(b.startTime));
       const importantPlans = daySchedules.filter(s => s.important);
       const regularPlans = daySchedules.filter(s => !s.important);
-      const dayActuals = state.actualLogs.filter(a => a.date === cell.dateStr);
+      const dayActuals = state.actualLogs.filter(
+        a => matchesSelectedProjectTag(a) && a.date === cell.dateStr
+      );
       const actualMins = dayActuals.reduce((acc, a) => acc + durationMinutes(a.startTime, a.endTime), 0);
+
+      if (!cell.otherMonth) {
+        impCount += importantPlans.length;
+        regCount += regularPlans.length;
+        todoCount += dayTodos.length;
+      }
 
       // 상단 날짜 헤더
       const head = document.createElement('div');
       head.className = 'mc-date-head';
 
-      const pendingTodoCount = dayTodos.filter(t => !t.completed).length;
+      const pendingTodoCount = dayTodos.filter(t => !isItemCompletedOnDate(t, cell.dateStr)).length;
       let rightBadgeHtml = '';
       if (mode === 'all' && actualMins > 0) {
         rightBadgeHtml = `<span class="mc-actual-badge">진행 ${formatDurationKo(actualMins)}</span>`;
@@ -1813,17 +2398,21 @@
           if (renderedCount >= maxVisible) return;
           renderedCount++;
           const cat = getCategoryById(todo.categoryId);
+          const isTodoDone = isItemCompletedOnDate(todo, cell.dateStr);
+          const pTag = cleanProjectTag(todo.projectTag);
+          const isRecurring = todo.repeat && todo.repeat !== 'none';
           const pill = document.createElement('div');
-          pill.className = `mc-item-pill mc-todo-pill ${todo.completed ? 'is-done' : ''}`;
+          pill.className = `mc-item-pill mc-todo-pill ${isTodoDone ? 'is-done' : ''}`;
           pill.style.borderLeftColor = cat.color;
           pill.innerHTML = `
-            <input type="checkbox" class="mc-inline-check" ${todo.completed ? 'checked' : ''} title="할 일 마감 완료 체크" />
-            <span class="mc-tag-chip deadline">마감</span>
+            <input type="checkbox" class="mc-inline-check" ${isTodoDone ? 'checked' : ''} title="할 일 마감 완료 체크" />
+            <span class="mc-tag-chip deadline">${isRecurring ? '🔁 정기' : '마감'}</span>
+            ${pTag ? `<span class="project-tag-pill">@${escapeHtml(pTag)}</span>` : ''}
             <span class="mc-item-title">${escapeHtml(todo.title)}</span>
           `;
           pill.querySelector('.mc-inline-check').addEventListener('click', e => {
             e.stopPropagation();
-            todo.completed = e.target.checked;
+            setItemCompletedOnDate(todo, cell.dateStr, e.target.checked);
             saveState();
             renderAll();
           });
@@ -1842,12 +2431,16 @@
           if (renderedCount >= maxVisible) return;
           renderedCount++;
           const cat = getCategoryById(plan.categoryId);
+          const isPlanDone = isItemCompletedOnDate(plan, cell.dateStr);
+          const pTag = cleanProjectTag(plan.projectTag);
+          const isRecurring = plan.repeat && plan.repeat !== 'none';
           const pill = document.createElement('div');
-          pill.className = `mc-item-pill mc-imp-pill ${plan.completed ? 'is-done' : ''}`;
+          pill.className = `mc-item-pill mc-imp-pill ${isPlanDone ? 'is-done' : ''}`;
           pill.style.background = `${cat.color}18`;
           pill.style.borderLeftColor = cat.color;
           pill.innerHTML = `
-            <span class="mc-tag-chip imp" style="background:${cat.color};color:#FFFFFF;">★ ${plan.startTime}</span>
+            <span class="mc-tag-chip imp" style="background:${cat.color};color:#FFFFFF;">${isRecurring ? '🔁' : '★'} ${plan.startTime}</span>
+            ${pTag ? `<span class="project-tag-pill">@${escapeHtml(pTag)}</span>` : ''}
             <span class="mc-item-title" style="color:${cat.color};font-weight:700;">${escapeHtml(plan.title)}</span>
           `;
           pill.addEventListener('click', e => {
@@ -1864,12 +2457,15 @@
           if (renderedCount >= maxVisible) return;
           renderedCount++;
           const cat = getCategoryById(plan.categoryId);
+          const isPlanDone = isItemCompletedOnDate(plan, cell.dateStr);
+          const pTag = cleanProjectTag(plan.projectTag);
           const pill = document.createElement('div');
-          pill.className = `mc-item-pill mc-reg-pill ${plan.completed ? 'is-done' : ''}`;
+          pill.className = `mc-item-pill mc-reg-pill ${isPlanDone ? 'is-done' : ''}`;
           pill.style.background = `${cat.color}12`;
           pill.style.borderLeftColor = cat.color;
           pill.innerHTML = `
             <span class="mc-reg-time" style="color:${cat.color}">${plan.startTime}</span>
+            ${pTag ? `<span class="project-tag-pill">@${escapeHtml(pTag)}</span>` : ''}
             <span class="mc-item-title">${escapeHtml(plan.title)}</span>
           `;
           pill.addEventListener('click', e => {
@@ -1879,7 +2475,6 @@
           stack.appendChild(pill);
         });
       } else if (mode === 'focus' && regularPlans.length > 0) {
-        // 주요 일정·마감 중심 모드에서는 일반 일정은 간결한 요약 배지로 표시하여 주요 일정과 마감이 돋보이게 함
         const summaryChip = document.createElement('div');
         summaryChip.className = 'mc-regular-summary';
         summaryChip.textContent = `일반 일정 ${regularPlans.length}건`;
@@ -1935,12 +2530,14 @@
     weekInfo.days.forEach(dayObj => {
       const dStr = dayObj.dateStr;
       const plans = state.schedules
-        .filter(s => s.date === dStr)
+        .filter(s => matchesSelectedProjectTag(s) && doesItemOccurOnDate(s, dStr, false))
         .sort((a, b) => timeToMinutes(a.startTime) - timeToMinutes(b.startTime));
       const actuals = state.actualLogs
-        .filter(a => a.date === dStr)
+        .filter(a => matchesSelectedProjectTag(a) && a.date === dStr)
         .sort((a, b) => timeToMinutes(a.startTime) - timeToMinutes(b.startTime));
-      const todos = state.todos.filter(t => t.dueDate === dStr);
+      const todos = state.todos.filter(
+        t => matchesSelectedProjectTag(t) && doesItemOccurOnDate(t, dStr, true)
+      );
 
       const planMins = plans.reduce((acc, p) => acc + durationMinutes(p.startTime, p.endTime), 0);
       const actualMins = actuals.reduce((acc, a) => acc + durationMinutes(a.startTime, a.endTime), 0);
@@ -1997,22 +2594,25 @@
       if (showPlan && todos.length > 0) {
         todos.forEach(todo => {
           const cat = getCategoryById(todo.categoryId);
+          const isTodoDone = isItemCompletedOnDate(todo, dStr);
+          const pTag = cleanProjectTag(todo.projectTag);
+          const isRecurring = todo.repeat && todo.repeat !== 'none';
           const tCard = document.createElement('div');
-          tCard.className = `wk-item-card wk-todo-card ${todo.completed ? 'is-done' : ''}`;
+          tCard.className = `wk-item-card wk-todo-card ${isTodoDone ? 'is-done' : ''}`;
           tCard.style.borderLeftColor = cat.color;
           tCard.innerHTML = `
             <div class="wk-card-top">
               <label class="wk-check-wrap">
-                <input type="checkbox" ${todo.completed ? 'checked' : ''} />
-                <span class="wk-type-tag deadline">마감</span>
+                <input type="checkbox" ${isTodoDone ? 'checked' : ''} />
+                <span class="wk-type-tag deadline">${isRecurring ? '🔁 정기' : '마감'}</span>
               </label>
-              <span class="wk-cat-label" style="color:${cat.color}">${escapeHtml(cat.name)}</span>
+              ${pTag ? `<span class="project-tag-pill">@${escapeHtml(pTag)}</span>` : `<span class="wk-cat-label" style="color:${cat.color}">${escapeHtml(cat.name)}</span>`}
             </div>
             <div class="wk-card-title">${todo.important ? '★ ' : ''}${escapeHtml(todo.title)}</div>
           `;
           tCard.querySelector('input').addEventListener('click', e => {
             e.stopPropagation();
-            todo.completed = e.target.checked;
+            setItemCompletedOnDate(todo, dStr, e.target.checked);
             saveState();
             renderAll();
           });
@@ -2048,34 +2648,42 @@
         combinedEntries.forEach(entry => {
           const item = entry.item;
           const cat = getCategoryById(item.categoryId);
+          const pTag = cleanProjectTag(item.projectTag);
           const card = document.createElement('div');
 
           if (entry.kind === 'plan') {
-            card.className = `wk-item-card wk-plan-card ${item.completed ? 'is-done' : ''}`;
+            const isPlanDone = isItemCompletedOnDate(item, dStr);
+            const isRecurring = item.repeat && item.repeat !== 'none';
+            card.className = `wk-item-card wk-plan-card ${isPlanDone ? 'is-done' : ''}`;
             card.style.borderLeftColor = cat.color;
             card.innerHTML = `
               <div class="wk-card-top">
-                <span class="wk-type-tag plan">계획</span>
+                <span class="wk-type-tag plan">${isRecurring ? '🔁 정기' : '계획'}</span>
                 <span class="wk-time-range">${item.startTime}~${item.endTime}</span>
-                <button type="button" class="wk-mini-check-btn" title="완료 체크 및 실제 진행 시간 자동 반영">${item.completed ? '✓ 완료' : '완료'}</button>
+                <button type="button" class="wk-mini-check-btn" title="완료 체크 및 실제 진행 시간 자동 반영">${isPlanDone ? '✓ 완료' : '완료'}</button>
               </div>
-              <div class="wk-card-title">${item.important ? '<span class="important-star">★</span> ' : ''}${escapeHtml(item.title)}</div>
+              <div class="wk-card-title">
+                ${pTag ? `<span class="project-tag-pill" style="margin-right:3px;">@${escapeHtml(pTag)}</span>` : ''}
+                ${item.important ? '<span class="important-star">★</span> ' : ''}${escapeHtml(item.title)}
+              </div>
             `;
             card.querySelector('.wk-mini-check-btn').addEventListener('click', e => {
               e.stopPropagation();
-              item.completed = !item.completed;
-              if (item.completed) {
+              const nextDone = !isItemCompletedOnDate(item, dStr);
+              setItemCompletedOnDate(item, dStr, nextDone);
+              if (nextDone) {
                 const exists = state.actualLogs.some(
-                  a => a.date === item.date && a.title === item.title && a.startTime === item.startTime
+                  a => a.date === dStr && a.title === item.title && a.startTime === item.startTime
                 );
                 if (!exists) {
                   state.actualLogs.push({
                     id: uid('act'),
                     title: item.title,
-                    date: item.date,
+                    date: dStr,
                     startTime: item.startTime,
                     endTime: item.endTime,
-                    categoryId: item.categoryId
+                    categoryId: item.categoryId,
+                    projectTag: pTag
                   });
                 }
               }
@@ -2098,7 +2706,10 @@
                 <span class="wk-time-range">${item.startTime}~${item.endTime}</span>
                 <span class="wk-dur-label" style="color:${cat.color}">${dur}분</span>
               </div>
-              <div class="wk-card-title">${escapeHtml(item.title)}</div>
+              <div class="wk-card-title">
+                ${pTag ? `<span class="project-tag-pill" style="margin-right:3px;">@${escapeHtml(pTag)}</span>` : ''}
+                ${escapeHtml(item.title)}
+              </div>
             `;
             card.addEventListener('click', e => {
               e.stopPropagation();
@@ -2149,9 +2760,15 @@
 
     weekInfo.days.forEach(dayObj => {
       const dStr = dayObj.dateStr;
-      const dayPlans = state.schedules.filter(s => s.date === dStr);
-      const dayActuals = state.actualLogs.filter(a => a.date === dStr);
-      const dayTodos = state.todos.filter(t => t.dueDate === dStr);
+      const dayPlans = state.schedules.filter(
+        s => matchesSelectedProjectTag(s) && doesItemOccurOnDate(s, dStr, false)
+      );
+      const dayActuals = state.actualLogs.filter(
+        a => matchesSelectedProjectTag(a) && a.date === dStr
+      );
+      const dayTodos = state.todos.filter(
+        t => matchesSelectedProjectTag(t) && doesItemOccurOnDate(t, dStr, true)
+      );
 
       const pMins = dayPlans.reduce((s, x) => s + durationMinutes(x.startTime, x.endTime), 0);
       const aMins = dayActuals.reduce((s, x) => s + durationMinutes(x.startTime, x.endTime), 0);
@@ -2180,7 +2797,7 @@
       const dStr = dayObj.dateStr;
       if (showPlan) {
         state.schedules
-          .filter(s => s.date === dStr)
+          .filter(s => matchesSelectedProjectTag(s) && doesItemOccurOnDate(s, dStr, false))
           .forEach(s => {
             const h = Math.floor(timeToMinutes(s.startTime) / 60);
             if (h >= 0 && h < minWeekHour) minWeekHour = h;
@@ -2188,7 +2805,7 @@
       }
       if (showActual) {
         state.actualLogs
-          .filter(a => a.date === dStr)
+          .filter(a => matchesSelectedProjectTag(a) && a.date === dStr)
           .forEach(a => {
             const h = Math.floor(timeToMinutes(a.startTime) / 60);
             if (h >= 0 && h < minWeekHour) minWeekHour = h;
@@ -2214,15 +2831,21 @@
 
         if (showPlan) {
           const plansInHour = state.schedules.filter(
-            s => s.date === dStr && Math.floor(timeToMinutes(s.startTime) / 60) === hour
+            s =>
+              matchesSelectedProjectTag(s) &&
+              doesItemOccurOnDate(s, dStr, false) &&
+              Math.floor(timeToMinutes(s.startTime) / 60) === hour
           );
           plansInHour.forEach(p => {
             const cat = getCategoryById(p.categoryId);
+            const isPlanDone = isItemCompletedOnDate(p, dStr);
+            const pTag = cleanProjectTag(p.projectTag);
             const chip = document.createElement('div');
-            chip.className = `wk-tt-chip plan ${p.completed ? 'is-done' : ''}`;
+            chip.className = `wk-tt-chip plan ${isPlanDone ? 'is-done' : ''}`;
             chip.style.borderLeftColor = cat.color;
             chip.innerHTML = `
-              <span class="wk-tt-chip-tag plan">계획</span>
+              <span class="wk-tt-chip-tag plan">${p.repeat && p.repeat !== 'none' ? '🔁' : '계획'}</span>
+              ${pTag ? `<span class="project-tag-pill">@${escapeHtml(pTag)}</span>` : ''}
               <span class="wk-tt-chip-title">${p.important ? '★ ' : ''}${escapeHtml(p.title)}</span>
             `;
             chip.addEventListener('click', e => {
@@ -2235,17 +2858,22 @@
 
         if (showActual) {
           const actualsInHour = state.actualLogs.filter(
-            a => a.date === dStr && Math.floor(timeToMinutes(a.startTime) / 60) === hour
+            a =>
+              matchesSelectedProjectTag(a) &&
+              a.date === dStr &&
+              Math.floor(timeToMinutes(a.startTime) / 60) === hour
           );
           actualsInHour.forEach(a => {
             const cat = getCategoryById(a.categoryId);
             const dur = durationMinutes(a.startTime, a.endTime);
+            const aTag = cleanProjectTag(a.projectTag);
             const chip = document.createElement('div');
             chip.className = 'wk-tt-chip actual';
             chip.style.borderLeftColor = cat.color;
             chip.style.background = `${cat.color}18`;
             chip.innerHTML = `
               <span class="wk-tt-chip-tag actual">진행 ${dur}분</span>
+              ${aTag ? `<span class="project-tag-pill">@${escapeHtml(aTag)}</span>` : ''}
               <span class="wk-tt-chip-title">${escapeHtml(a.title)}</span>
             `;
             chip.addEventListener('click', e => {
@@ -2277,34 +2905,45 @@
     if (!container) return;
 
     const scheduleItems = state.schedules
+      .filter(s => matchesSelectedProjectTag(s))
       .filter(s => (currentMilestoneFilter === 'important' ? s.important : currentMilestoneFilter === 'all'))
-      .map(s => ({
-        kind: 'schedule',
-        ref: s,
-        date: s.date,
-        time: `${s.startTime}~${s.endTime}`,
-        title: s.title,
-        categoryId: s.categoryId,
-        important: Boolean(s.important),
-        completed: Boolean(s.completed)
-      }));
+      .map(s => {
+        const nextDate = getNextOccurrenceDateStr(s, selectedDate, false);
+        return {
+          kind: 'schedule',
+          ref: s,
+          date: nextDate,
+          time: `${s.startTime}~${s.endTime}`,
+          title: s.title,
+          categoryId: s.categoryId,
+          projectTag: cleanProjectTag(s.projectTag),
+          repeatLabel: getRepeatLabelKo(s.repeat, s.date),
+          important: Boolean(s.important),
+          completed: isItemCompletedOnDate(s, nextDate)
+        };
+      });
 
-    // 전체 필터에서도 주요 일정이 상단에 돋보이도록 정렬하되, 주요 일정이 아닌 일반 일정도 날짜순 확인 가능
     const todoItems =
       currentMilestoneFilter === 'important'
         ? []
         : state.todos
-            .filter(t => Boolean(t.dueDate))
-            .map(t => ({
-              kind: 'todo',
-              ref: t,
-              date: t.dueDate,
-              time: '할 일 마감',
-              title: t.title,
-              categoryId: t.categoryId,
-              important: Boolean(t.important),
-              completed: Boolean(t.completed)
-            }));
+            .filter(t => matchesSelectedProjectTag(t))
+            .filter(t => Boolean(t.dueDate) || (t.repeat && t.repeat !== 'none'))
+            .map(t => {
+              const nextDate = getNextOccurrenceDateStr(t, selectedDate, true);
+              return {
+                kind: 'todo',
+                ref: t,
+                date: nextDate,
+                time: '할 일 마감',
+                title: t.title,
+                categoryId: t.categoryId,
+                projectTag: cleanProjectTag(t.projectTag),
+                repeatLabel: getRepeatLabelKo(t.repeat, t.dueDate),
+                important: Boolean(t.important),
+                completed: isItemCompletedOnDate(t, nextDate)
+              };
+            });
 
     let combined = [];
     if (currentMilestoneFilter === 'deadline') {
@@ -2312,7 +2951,6 @@
     } else if (currentMilestoneFilter === 'important') {
       combined = scheduleItems;
     } else {
-      // 기본 전체 보기: 중요 일정 + 할 일 마감을 최우선 표시
       const keySchedules = scheduleItems.filter(s => s.important);
       const otherSchedules = scheduleItems.filter(s => !s.important);
       combined = [...todoItems, ...keySchedules, ...otherSchedules];
@@ -2343,6 +2981,8 @@
               ${item.kind === 'todo' ? '할 일 마감' : item.important ? '★ 주요 일정' : '일정'}
             </span>
             <span class="ms-dday-badge ${dday.cls}">${dday.text}</span>
+            ${item.projectTag ? `<span class="project-tag-pill">@${escapeHtml(item.projectTag)}</span>` : ''}
+            ${item.repeatLabel ? `<span class="repeat-badge">${escapeHtml(item.repeatLabel)}</span>` : ''}
           </div>
           <span class="cat-dot-tag" style="background:${cat.color}20;color:${cat.color}">${escapeHtml(cat.name)}</span>
         </div>
@@ -2357,7 +2997,7 @@
 
       el.querySelector('.ms-check').addEventListener('click', e => {
         e.stopPropagation();
-        item.ref.completed = e.target.checked;
+        setItemCompletedOnDate(item.ref, item.date, e.target.checked);
         saveState();
         renderAll();
       });
@@ -2534,6 +3174,37 @@
         .join('');
     }
 
+    // 2-2. 프로젝트 태그별 투입 시간 및 진행 현황 테이블
+    const projTbody = document.getElementById('reportProjectTagTableBody');
+    if (projTbody) {
+      const allTags = getAllProjectTags();
+      if (allTags.length === 0) {
+        projTbody.innerHTML = `<tr><td colspan="5" style="text-align:center;color:#64748B;">등록된 @프로젝트태그가 없습니다. 일정이나 할 일에 프로젝트 태그를 지정해 보세요.</td></tr>`;
+      } else {
+        projTbody.innerHTML = allTags
+          .map(tag => {
+            const tagSch = state.schedules.filter(s => cleanProjectTag(s.projectTag) === tag);
+            const recSchCount = tagSch.filter(s => s.repeat && s.repeat !== 'none').length;
+            const tagTodos = state.todos.filter(t => cleanProjectTag(t.projectTag) === tag);
+            const doneTodos = tagTodos.filter(t => isItemCompletedOnDate(t, selectedDate)).length;
+            const planMins = tagSch.reduce((sum, s) => sum + durationMinutes(s.startTime, s.endTime), 0);
+            const actMins = state.actualLogs
+              .filter(a => cleanProjectTag(a.projectTag) === tag)
+              .reduce((sum, a) => sum + durationMinutes(a.startTime, a.endTime), 0);
+            return `
+              <tr>
+                <td><span class="pg-tag-badge">@${escapeHtml(tag)}</span></td>
+                <td>총 ${tagSch.length}건${recSchCount > 0 ? ` · 정기 ${recSchCount}건` : ''}</td>
+                <td>${doneTodos}/${tagTodos.length} 완료</td>
+                <td>${formatDurationKo(planMins)}</td>
+                <td><strong>${formatDurationKo(actMins)}</strong></td>
+              </tr>
+            `;
+          })
+          .join('');
+      }
+    }
+
     // 3. 우측: 회고 노트 반영
     document.getElementById('reviewKeepInput').value = state.reviewNotes.keep || '';
     document.getElementById('reviewProblemInput').value = state.reviewNotes.problem || '';
@@ -2643,9 +3314,9 @@
     const todayStr = getTodayStr();
     const nowTime = getNowTimeStr();
 
-    // 1. 오늘 일정 알람 확인
+    // 1. 오늘 일정 알람 확인 (정기 반복 일정 포함)
     state.schedules.forEach(s => {
-      if (s.date === todayStr && s.alarm && !s.completed && s.startTime === nowTime) {
+      if (doesItemOccurOnDate(s, todayStr, false) && s.alarm && !isItemCompletedOnDate(s, todayStr) && s.startTime === nowTime) {
         const key = `sch_${s.id}_${todayStr}_${nowTime}`;
         if (!triggeredAlarmKeys.has(key)) {
           triggeredAlarmKeys.add(key);
@@ -2654,6 +3325,7 @@
             title: s.title,
             time: s.startTime,
             categoryId: s.categoryId,
+            projectTag: s.projectTag || '',
             refId: s.id
           });
         }
@@ -2759,6 +3431,9 @@
             startTime: s.startTime || '09:00',
             endTime: s.endTime || '10:00',
             categoryId: s.categoryId || state.categories[0].id,
+            projectTag: cleanProjectTag(s.projectTag || selectedProjectTag),
+            repeat: s.repeat || 'none',
+            completedDates: [],
             alarm: s.alarm !== false,
             important: Boolean(s.important),
             completed: false
@@ -2773,6 +3448,9 @@
             title: t.title || '새 할 일',
             dueDate: t.dueDate || selectedDate,
             categoryId: t.categoryId || state.categories[0].id,
+            projectTag: cleanProjectTag(t.projectTag || selectedProjectTag),
+            repeat: t.repeat || 'none',
+            completedDates: [],
             estimatedMinutes: Number(t.estimatedMinutes || 30),
             important: Boolean(t.important),
             completed: false
@@ -2788,7 +3466,8 @@
             date: a.date || selectedDate,
             startTime: a.startTime || '14:00',
             endTime: a.endTime || '15:00',
-            categoryId: a.categoryId || state.categories[0].id
+            categoryId: a.categoryId || state.categories[0].id,
+            projectTag: cleanProjectTag(a.projectTag || selectedProjectTag)
           });
           addedCount++;
         });
@@ -2816,6 +3495,8 @@
 
   function applyParsedQuickItem(parsed) {
     if (!parsed) return;
+    const tag = cleanProjectTag(parsed.projectTag || selectedProjectTag);
+    const repeat = parsed.repeat || 'none';
     if (parsed.type === 'actual') {
       state.actualLogs.push({
         id: uid('act'),
@@ -2823,7 +3504,8 @@
         date: parsed.date,
         startTime: parsed.startTime,
         endTime: parsed.endTime,
-        categoryId: parsed.categoryId
+        categoryId: parsed.categoryId,
+        projectTag: tag
       });
     } else if (parsed.type === 'schedule') {
       state.schedules.push({
@@ -2833,6 +3515,9 @@
         startTime: parsed.startTime,
         endTime: parsed.endTime,
         categoryId: parsed.categoryId,
+        projectTag: tag,
+        repeat,
+        completedDates: [],
         alarm: true,
         important: parsed.important,
         completed: false
@@ -2843,6 +3528,9 @@
         title: parsed.title,
         dueDate: parsed.date,
         categoryId: parsed.categoryId,
+        projectTag: tag,
+        repeat,
+        completedDates: [],
         estimatedMinutes: 30,
         important: parsed.important,
         completed: false
@@ -3088,7 +3776,7 @@
   }
 
   // -------------------- 모달 열기·닫기·편집 핸들러 --------------------
-  function openItemModalForCreate(type, startTime = '09:00', endTime = '10:00') {
+  function openItemModalForCreate(type, startTime = '09:00', endTime = '10:00', defaultTag = '', defaultRepeat = 'none') {
     document.getElementById('itemModalHeading').textContent =
       type === 'actual' ? '실제 사용 시간 기록 추가' : type === 'todo' ? '할 일 추가' : '계획 일정 추가';
     document.getElementById('itemModalId').value = '';
@@ -3097,6 +3785,13 @@
     document.getElementById('itemModalDate').value = selectedDate;
     document.getElementById('itemModalStartTime').value = startTime;
     document.getElementById('itemModalEndTime').value = endTime;
+    const tagInput = document.getElementById('itemModalProjectTag');
+    if (tagInput) {
+      const fallbackTag = selectedProjectTag && selectedProjectTag !== '__UNASSIGNED__' ? selectedProjectTag : '';
+      tagInput.value = cleanProjectTag(defaultTag || fallbackTag);
+    }
+    const repeatSel = document.getElementById('itemModalRepeat');
+    if (repeatSel) repeatSel.value = defaultRepeat || 'none';
     document.getElementById('itemModalAlarm').checked = true;
     document.getElementById('itemModalImportant').checked = false;
     document.getElementById('itemModalDeleteBtn').classList.add('hidden');
@@ -3111,6 +3806,10 @@
     document.getElementById('itemModalTitle').value = item.title || '';
     document.getElementById('itemModalDate').value = item.date || item.dueDate || selectedDate;
     document.getElementById('itemModalCategory').value = item.categoryId || state.categories[0].id;
+    const tagInput = document.getElementById('itemModalProjectTag');
+    if (tagInput) tagInput.value = cleanProjectTag(item.projectTag || '');
+    const repeatSel = document.getElementById('itemModalRepeat');
+    if (repeatSel) repeatSel.value = item.repeat || 'none';
     document.getElementById('itemModalStartTime').value = item.startTime || '09:00';
     document.getElementById('itemModalEndTime').value = item.endTime || '10:00';
     document.getElementById('itemModalAlarm').checked = item.alarm !== false;
@@ -3125,6 +3824,11 @@
     if (timeRow) {
       if (type === 'todo') timeRow.classList.add('hidden');
       else timeRow.classList.remove('hidden');
+    }
+    const repeatWrap = document.getElementById('itemModalRepeatWrap');
+    if (repeatWrap) {
+      if (type === 'actual') repeatWrap.classList.add('hidden');
+      else repeatWrap.classList.remove('hidden');
     }
   }
 
@@ -3473,13 +4177,15 @@
     const updatePreview = () => {
       const parsed = parseNaturalQuickInput(quickInputEl.value, quickModeEl.value, quickCatEl.value);
       if (!parsed) {
-        previewEl.textContent = '시간이나 #카테고리를 포함해 입력하면 자동으로 분류됩니다.';
+        previewEl.textContent = '시간이나 @프로젝트태그, 매주·매일 키워드를 포함해 입력하면 자동으로 분류됩니다.';
         return;
       }
       const cat = getCategoryById(parsed.categoryId);
       const typeLabel =
         parsed.type === 'actual' ? '실제 기록' : parsed.type === 'schedule' ? '계획 일정' : '할 일';
-      previewEl.textContent = `[${typeLabel}] ${parsed.date} ${parsed.type !== 'todo' ? `${parsed.startTime}~${parsed.endTime}` : ''} · ${parsed.title} · ${cat.name}`;
+      const tagPart = parsed.projectTag ? ` · @${parsed.projectTag}` : '';
+      const repeatPart = parsed.repeat && parsed.repeat !== 'none' ? ` · ↻ ${getRepeatLabelKo(parsed.repeat, parsed.date)}` : '';
+      previewEl.textContent = `[${typeLabel}] ${parsed.date} ${parsed.type !== 'todo' ? `${parsed.startTime}~${parsed.endTime}` : ''}${repeatPart}${tagPart} · ${parsed.title} · ${cat.name}`;
     };
 
     quickInputEl.addEventListener('input', updatePreview);
@@ -3580,7 +4286,12 @@
       renderMiniCalendar();
     });
 
-    // 할 일 필터 탭
+    // 할 일 필터 탭 및 프로젝트 태그 묶음 보기 토글
+    document.getElementById('toggleTodoGroupByTagBtn')?.addEventListener('click', () => {
+      todoGroupByTag = !todoGroupByTag;
+      renderTodoList();
+    });
+
     document.querySelectorAll('#todoFilterTabs .filter-pill').forEach(btn => {
       btn.addEventListener('click', () => {
         document.querySelectorAll('#todoFilterTabs .filter-pill').forEach(b => b.classList.remove('active'));
@@ -3608,6 +4319,8 @@
       const title = document.getElementById('itemModalTitle').value.trim();
       const date = document.getElementById('itemModalDate').value || selectedDate;
       const categoryId = document.getElementById('itemModalCategory').value;
+      const projectTag = cleanProjectTag(document.getElementById('itemModalProjectTag')?.value || '');
+      const repeat = document.getElementById('itemModalRepeat')?.value || 'none';
       const startTime = document.getElementById('itemModalStartTime').value || '09:00';
       let endTime = document.getElementById('itemModalEndTime').value || '10:00';
       const alarm = document.getElementById('itemModalAlarm').checked;
@@ -3618,8 +4331,9 @@
         endTime = minutesToTime(timeToMinutes(startTime) + 30);
       }
 
-      // 기존 항목이면 완료 여부 및 예상 소요 시간을 보존한 뒤 교체
+      // 기존 항목이면 완료 여부, 반복 완료 날짜 목록, 예상 소요 시간을 보존한 뒤 교체
       let prevCompleted = false;
+      let prevCompletedDates = [];
       let prevEstimatedMinutes = 30;
       if (id) {
         const prevItem =
@@ -3627,6 +4341,9 @@
           state.todos.find(x => x.id === id);
         if (prevItem) {
           prevCompleted = Boolean(prevItem.completed);
+          if (Array.isArray(prevItem.completedDates)) {
+            prevCompletedDates = [...prevItem.completedDates];
+          }
           if (prevItem.estimatedMinutes) {
             prevEstimatedMinutes = Number(prevItem.estimatedMinutes);
           }
@@ -3644,6 +4361,9 @@
           startTime,
           endTime,
           categoryId,
+          projectTag,
+          repeat,
+          completedDates: prevCompletedDates,
           alarm,
           important,
           completed: prevCompleted
@@ -3655,7 +4375,8 @@
           date,
           startTime,
           endTime,
-          categoryId
+          categoryId,
+          projectTag
         });
       } else {
         state.todos.push({
@@ -3663,6 +4384,9 @@
           title,
           dueDate: date,
           categoryId,
+          projectTag,
+          repeat,
+          completedDates: prevCompletedDates,
           estimatedMinutes: prevEstimatedMinutes,
           important,
           completed: prevCompleted
@@ -3691,7 +4415,8 @@
     document.getElementById('startLiveTrackerBtn').addEventListener('click', () => {
       const title = document.getElementById('liveTrackerTitle').value.trim() || '집중 업무 및 학습';
       const catId = document.getElementById('liveTrackerCategory').value;
-      startLiveTrackerWith(title, catId);
+      const tag = cleanProjectTag(document.getElementById('liveTrackerProjectTag')?.value || '');
+      startLiveTrackerWith(title, catId, tag);
     });
     document.getElementById('stopLiveTrackerBtn').addEventListener('click', stopLiveTrackerAndRecord);
 
@@ -3931,7 +4656,7 @@
         switchTab('routines');
         startRoutinePlayer(item.refId);
       } else {
-        startLiveTrackerWith(item.title, item.categoryId);
+        startLiveTrackerWith(item.title, item.categoryId, item.projectTag || '');
       }
     });
 

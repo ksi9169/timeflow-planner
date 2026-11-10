@@ -124,7 +124,7 @@
         <input
           type="text"
           id="quickInputText"
-          placeholder="한 줄 입력 — 예: 14:00~16:00 기획안 작성 #업무 !중요  또는  13:00~14:30 코딩 공부 기록"
+          placeholder="한 줄 입력 — 예: @신규런칭 매주 수요일 14:00~15:00 정기 회의 #업무  또는  @학급안내 매주 금요일 주간 안내 발송"
           autocomplete="off"
         />
       </div>
@@ -137,18 +137,27 @@
       </div>
     </form>
     <div class="quick-preset-row">
-      <span class="preset-guide">원터치 시간 태그:</span>
+      <span class="preset-guide">원터치 태그:</span>
+      <button type="button" class="chip-btn" data-insert="@신규런칭 ">@신규런칭</button>
+      <button type="button" class="chip-btn" data-insert="@정기안내 ">@정기안내</button>
+      <button type="button" class="chip-btn" data-insert="매주 ">매주 반복</button>
       <button type="button" class="chip-btn" data-insert="09:00~10:00 ">오전 9시</button>
       <button type="button" class="chip-btn" data-insert="14:00~15:00 ">오후 2시</button>
-      <button type="button" class="chip-btn" data-insert="19:00~20:00 ">저녁 7시</button>
-      <button type="button" class="chip-btn" data-insert="내일 10:00~11:00 ">내일 오전</button>
       <button type="button" class="chip-btn" data-insert="!중요 ">중요 표시</button>
-      <span id="quickParsePreview" class="quick-preview-text">시간이나 #카테고리를 포함해 입력하면 자동으로 분류됩니다.</span>
+      <span id="quickParsePreview" class="quick-preview-text">@프로젝트태그, 매주·매일 반복, 시간, #카테고리를 입력하면 자동으로 분류됩니다.</span>
     </div>
   </section>
 
   <!-- 메인 콘텐츠 컨테이너 -->
   <main class="main-container">
+    <!-- 프로젝트 태그 통합 필터 바 -->
+    <section id="projectTagFilterSection" class="project-tag-bar" aria-label="프로젝트 태그 필터">
+      <div class="ptag-bar-left">
+        <span class="ptag-bar-title">프로젝트 태그</span>
+        <div id="projectTagFilterChips" class="ptag-chip-list"></div>
+      </div>
+      <div id="projectTagActiveSummary" class="ptag-active-summary">전체 프로젝트와 일반 항목을 함께 표시합니다</div>
+    </section>
     <!-- ==================== 탭 1: 오늘 대시보드 ==================== -->
     <section id="tab-dashboard" class="tab-view active">
       <!-- 상단 요약 KPI 4종 -->
@@ -224,13 +233,17 @@
           <section class="panel-card flex-grow-card">
             <div class="panel-head">
               <div>
-                <h2 class="panel-title">할 일 및 보관함</h2>
-                <p class="panel-subdesc">타이머를 눌러 바로 시작하거나 시간대에 배정하세요.</p>
+                <h2 class="panel-title">할 일 및 프로젝트 묶음</h2>
+                <p class="panel-subdesc">태그별로 묶어 보거나 정기 반복 과업과 일반 할 일을 함께 관리합니다.</p>
               </div>
-              <button type="button" id="openAddTodoModalBtn" class="btn-xs btn-outline">할 일 추가</button>
+              <div class="todo-head-actions">
+                <button type="button" id="toggleTodoGroupByTagBtn" class="btn-xs btn-teal active" title="같은 프로젝트 태그끼리 할 일과 정기 일정을 묶어서 표시합니다">태그별 묶음</button>
+                <button type="button" id="openAddTodoModalBtn" class="btn-xs btn-outline">할 일 추가</button>
+              </div>
             </div>
             <div class="filter-tabs" id="todoFilterTabs">
-              <button type="button" class="filter-pill active" data-filter="today">오늘 할 일</button>
+              <button type="button" class="filter-pill active" data-filter="today">오늘 · 진행 중</button>
+              <button type="button" class="filter-pill" data-filter="recurring">정기 · 반복</button>
               <button type="button" class="filter-pill" data-filter="backlog">날짜 미정 보관함</button>
               <button type="button" class="filter-pill" data-filter="done">완료 항목</button>
             </div>
@@ -333,7 +346,10 @@
               <div id="liveTrackerClock" class="live-clock-display">00:00:00</div>
               <div class="live-tracker-inputs">
                 <input type="text" id="liveTrackerTitle" placeholder="지금 어떤 일을 시작하시나요?" />
-                <select id="liveTrackerCategory" aria-label="기록할 카테고리 선택"></select>
+                <div class="live-tracker-subrow">
+                  <select id="liveTrackerCategory" aria-label="기록할 카테고리 선택"></select>
+                  <input type="text" id="liveTrackerProjectTag" list="projectTagDatalist" placeholder="@프로젝트 태그" aria-label="프로젝트 태그" />
+                </div>
               </div>
               <div class="live-tracker-btns">
                 <button type="button" id="startLiveTrackerBtn" class="btn-teal full-width">기록 시작</button>
@@ -611,6 +627,30 @@
             </div>
           </section>
 
+          <!-- 프로젝트 태그별 시간 및 할 일 진행 분석 -->
+          <section class="panel-card">
+            <div class="panel-head">
+              <div>
+                <h3 class="panel-title">프로젝트 태그별 투입 시간 및 진행 현황</h3>
+                <p class="panel-subdesc">공통 태그로 묶인 정기 회의·안내 일정과 할 일, 실제 투입 시간을 프로젝트 단위로 집계합니다.</p>
+              </div>
+            </div>
+            <div class="table-wrap">
+              <table class="report-compare-table">
+                <thead>
+                  <tr>
+                    <th>프로젝트 태그</th>
+                    <th>정기 · 일반 일정</th>
+                    <th>할 일 달성</th>
+                    <th>계획 시간</th>
+                    <th>실제 투입 시간</th>
+                  </tr>
+                </thead>
+                <tbody id="reportProjectTagTableBody"></tbody>
+              </table>
+            </div>
+          </section>
+
           <!-- AI 심층 시간 분석 보고서 -->
           <section class="panel-card ai-report-card">
             <div class="panel-head">
@@ -749,12 +789,29 @@
         </div>
         <div class="form-row two-col">
           <div>
-            <label for="itemModalDate">날짜</label>
+            <label for="itemModalDate">기준 날짜</label>
             <input type="date" id="itemModalDate" />
           </div>
           <div>
             <label for="itemModalCategory">카테고리</label>
             <select id="itemModalCategory"></select>
+          </div>
+        </div>
+        <div class="form-row two-col">
+          <div>
+            <label for="itemModalProjectTag">프로젝트 태그</label>
+            <input type="text" id="itemModalProjectTag" list="projectTagDatalist" placeholder="예: 신규런칭, 정기안내" autocomplete="off" />
+            <datalist id="projectTagDatalist"></datalist>
+          </div>
+          <div id="itemModalRepeatWrap">
+            <label for="itemModalRepeat">반복 주기</label>
+            <select id="itemModalRepeat">
+              <option value="none">반복 없음</option>
+              <option value="weekly">매주 같은 요일</option>
+              <option value="daily">매일 반복</option>
+              <option value="weekdays">평일마다 반복</option>
+              <option value="monthly">매월 같은 날짜</option>
+            </select>
           </div>
         </div>
         <div id="itemModalTimeRow" class="form-row two-col">
