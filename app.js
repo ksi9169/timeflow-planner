@@ -744,6 +744,15 @@
     };
   }
 
+  function syncCalCursorsToSelectedDate(syncFullCal = false) {
+    const [sy, sm] = selectedDate.split('-').map(Number);
+    if (!sy || !sm) return;
+    miniCalCursor = new Date(sy, sm - 1, 1);
+    if (syncFullCal) {
+      fullCalCursor = new Date(sy, sm - 1, 1);
+    }
+  }
+
   // -------------------- 전체 UI 렌더링 오케스트레이터 --------------------
   function renderAll() {
     renderHeaderDate();
@@ -764,10 +773,6 @@
     if (el) {
       el.textContent = `${formatDateHeadingKo(selectedDate)} · 계획과 실행을 한눈에`;
     }
-    const tlTitle = document.getElementById('timelineDateTitle');
-    if (tlTitle) {
-      tlTitle.textContent = formatDateHeadingKo(selectedDate);
-    }
   }
 
   function renderCategorySelects() {
@@ -783,7 +788,7 @@
       if (!sel) return;
       const prevVal = sel.value;
       sel.innerHTML = state.categories
-        .map(c => `<option value="${c.id}">${c.name}</option>`)
+        .map(c => `<option value="${escapeHtml(c.id)}">${escapeHtml(c.name)}</option>`)
         .join('');
       if (prevVal && state.categories.some(c => c.id === prevVal)) {
         sel.value = prevVal;
@@ -797,7 +802,7 @@
           c => `
           <span class="legend-chip">
             <span class="legend-color-box" style="background:${c.color}"></span>
-            <span>${c.name}</span>
+            <span>${escapeHtml(c.name)}</span>
           </span>`
         )
         .join('');
@@ -910,6 +915,7 @@
       `;
       btn.addEventListener('click', () => {
         selectedDate = cell.dateStr;
+        syncCalCursorsToSelectedDate(false);
         renderAll();
       });
       grid.appendChild(btn);
@@ -1088,11 +1094,21 @@
     const currentHour = new Date().getHours();
     const isToday = selectedDate === getTodayStr();
 
+    let minHour = 6;
+    dayPlans.forEach(p => {
+      const h = Math.floor(timeToMinutes(p.startTime) / 60);
+      if (h >= 0 && h < minHour) minHour = h;
+    });
+    dayActuals.forEach(a => {
+      const h = Math.floor(timeToMinutes(a.startTime) / 60);
+      if (h >= 0 && h < minHour) minHour = h;
+    });
+
     scrollEl.innerHTML = '';
 
-    for (let hour = 6; hour <= 23; hour++) {
+    for (let hour = minHour; hour <= 23; hour++) {
       const hourStr = `${String(hour).padStart(2, '0')}:00`;
-      const nextHourStr = `${String(hour + 1).padStart(2, '0')}:00`;
+      const nextHourStr = hour === 23 ? '23:59' : `${String(hour + 1).padStart(2, '0')}:00`;
       const row = document.createElement('div');
       row.className = `dt-hour-row ${dashTrackMode !== 'both' ? 'single-col' : ''} ${isToday && hour === currentHour ? 'current-hour-row' : ''}`;
 
@@ -2158,10 +2174,31 @@
     });
     table.appendChild(headRow);
 
-    // 2. 06:00 ~ 23:00 시간 행
-    for (let hour = 6; hour <= 23; hour++) {
+    // 2. 시간 행 (조기 일정이 있으면 06시 이전부터 자동 표시)
+    let minWeekHour = 6;
+    weekInfo.days.forEach(dayObj => {
+      const dStr = dayObj.dateStr;
+      if (showPlan) {
+        state.schedules
+          .filter(s => s.date === dStr)
+          .forEach(s => {
+            const h = Math.floor(timeToMinutes(s.startTime) / 60);
+            if (h >= 0 && h < minWeekHour) minWeekHour = h;
+          });
+      }
+      if (showActual) {
+        state.actualLogs
+          .filter(a => a.date === dStr)
+          .forEach(a => {
+            const h = Math.floor(timeToMinutes(a.startTime) / 60);
+            if (h >= 0 && h < minWeekHour) minWeekHour = h;
+          });
+      }
+    });
+
+    for (let hour = minWeekHour; hour <= 23; hour++) {
       const hourStr = `${String(hour).padStart(2, '0')}:00`;
-      const nextHourStr = `${String(hour + 1).padStart(2, '0')}:00`;
+      const nextHourStr = hour === 23 ? '23:59' : `${String(hour + 1).padStart(2, '0')}:00`;
       const row = document.createElement('div');
       row.className = 'wk-tt-row';
 
@@ -2337,14 +2374,14 @@
 
   // -------------------- 탭 4: 타임트래커 분석 보고서 & 다음 달 목표 설계 --------------------
   function computeReportStatistics() {
-    const todayStr = getTodayStr();
-    const ymPrefix = todayStr.slice(0, 7); // YYYY-MM
-    const sevenDaysAgo = addDaysStr(todayStr, -6);
+    const baseDateStr = selectedDate || getTodayStr();
+    const ymPrefix = baseDateStr.slice(0, 7); // YYYY-MM
+    const sevenDaysAgo = addDaysStr(baseDateStr, -6);
 
     const filterFn = item => {
       if (!item.date) return false;
-      if (currentReportPeriod === 'today') return item.date === todayStr;
-      if (currentReportPeriod === 'last7Days') return item.date >= sevenDaysAgo && item.date <= todayStr;
+      if (currentReportPeriod === 'today') return item.date === baseDateStr;
+      if (currentReportPeriod === 'last7Days') return item.date >= sevenDaysAgo && item.date <= baseDateStr;
       return item.date.startsWith(ymPrefix);
     };
 
@@ -3124,7 +3161,7 @@
     row.className = 'step-edit-row';
     row.innerHTML = `
       <input type="text" class="step-row-title" placeholder="행동 이름" value="${escapeHtml(title)}" required />
-      <input type="number" class="step-row-mins" min="1" max="180" value="${Number(minutes || 5)}" title="목표 시간(분)" />
+      <input type="number" class="step-row-mins" min="1" max="180" value="${Number(minutes || 5)}" title="목표 시간 분 단위" />
       <span style="font-size:0.78rem;color:#64748B;">분</span>
       <input type="text" class="step-row-tip" placeholder="음성 안내 팁" value="${escapeHtml(tip || '')}" />
       <button type="button" class="btn-xs btn-danger-ghost step-row-del">&times;</button>
@@ -3188,6 +3225,24 @@
     });
   }
 
+  function normalizeImportedState(rawState) {
+    const fallback = createInitialState();
+    if (!rawState || typeof rawState !== 'object') return fallback;
+    return {
+      ...fallback,
+      ...rawState,
+      settings: { ...fallback.settings, ...(rawState.settings || {}) },
+      reviewNotes: { ...fallback.reviewNotes, ...(rawState.reviewNotes || {}) },
+      timeBudgets: { ...fallback.timeBudgets, ...(rawState.timeBudgets || {}) },
+      categories: Array.isArray(rawState.categories) && rawState.categories.length > 0 ? rawState.categories : fallback.categories,
+      schedules: Array.isArray(rawState.schedules) ? rawState.schedules : fallback.schedules,
+      actualLogs: Array.isArray(rawState.actualLogs) ? rawState.actualLogs : fallback.actualLogs,
+      todos: Array.isArray(rawState.todos) ? rawState.todos : fallback.todos,
+      routines: Array.isArray(rawState.routines) ? rawState.routines : fallback.routines,
+      monthlyGoals: Array.isArray(rawState.monthlyGoals) ? rawState.monthlyGoals : fallback.monthlyGoals
+    };
+  }
+
   // -------------------- 클라우드 동기화 (Supabase 직접 + Worker 하이브리드) --------------------
   async function syncToCloud(action = 'save') {
     const codeInput = document.getElementById('cloudSyncCodeInput');
@@ -3207,45 +3262,79 @@
 
     try {
       if (action === 'save') {
-        const nowIso = new Date().toISOString();
-        const res = await fetch(`${SUPABASE_URL}/rest/v1/escape_rooms`, {
-          method: 'POST',
-          headers: {
-            apikey: SUPABASE_KEY,
-            Authorization: `Bearer ${SUPABASE_KEY}`,
-            'Content-Type': 'application/json',
-            Prefer: 'resolution=merge-duplicates,return=minimal'
-          },
-          body: JSON.stringify({
-            code: dbKey,
-            room_data: state,
-            updated_at: nowIso
-          })
-        });
-        if (!res.ok) throw new Error('업로드 실패');
+        let savedOk = false;
+        try {
+          const workerRes = await fetch('/api/sync', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ action: 'save', syncCode: rawCode, state })
+          });
+          if (workerRes.ok) {
+            const wData = await workerRes.json().catch(() => null);
+            if (wData && wData.ok) savedOk = true;
+          }
+        } catch (_) {}
+
+        if (!savedOk) {
+          const nowIso = new Date().toISOString();
+          const res = await fetch(`${SUPABASE_URL}/rest/v1/escape_rooms`, {
+            method: 'POST',
+            headers: {
+              apikey: SUPABASE_KEY,
+              Authorization: `Bearer ${SUPABASE_KEY}`,
+              'Content-Type': 'application/json',
+              Prefer: 'resolution=merge-duplicates,return=minimal'
+            },
+            body: JSON.stringify({
+              code: dbKey,
+              room_data: state,
+              updated_at: nowIso
+            })
+          });
+          if (!res.ok) throw new Error('업로드 실패');
+        }
         statusEl.textContent = `클라우드 업로드 완료 · ${new Date().toLocaleTimeString()}`;
         showToast(`동기화 코드 '${rawCode}'로 클라우드 저장이 완료되었습니다.`);
       } else {
-        const res = await fetch(
-          `${SUPABASE_URL}/rest/v1/escape_rooms?code=eq.${encodeURIComponent(dbKey)}&select=room_data,updated_at`,
-          {
-            headers: {
-              apikey: SUPABASE_KEY,
-              Authorization: `Bearer ${SUPABASE_KEY}`
+        let loadedData = null;
+        try {
+          const workerRes = await fetch('/api/sync', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ action: 'load', syncCode: rawCode })
+          });
+          if (workerRes.ok) {
+            const wData = await workerRes.json().catch(() => null);
+            if (wData && wData.ok && wData.found && wData.state) {
+              loadedData = wData.state;
             }
           }
-        );
-        if (!res.ok) throw new Error('조회 실패');
-        const rows = await res.json();
-        if (!Array.isArray(rows) || rows.length === 0 || !rows[0].room_data) {
+        } catch (_) {}
+
+        if (!loadedData) {
+          const res = await fetch(
+            `${SUPABASE_URL}/rest/v1/escape_rooms?code=eq.${encodeURIComponent(dbKey)}&select=room_data,updated_at`,
+            {
+              headers: {
+                apikey: SUPABASE_KEY,
+                Authorization: `Bearer ${SUPABASE_KEY}`
+              }
+            }
+          );
+          if (!res.ok) throw new Error('조회 실패');
+          const rows = await res.json();
+          if (Array.isArray(rows) && rows.length > 0 && rows[0].room_data) {
+            loadedData = rows[0].room_data;
+          }
+        }
+
+        if (!loadedData) {
           statusEl.textContent = '해당 동기화 코드로 저장된 데이터가 없습니다.';
           showToast('해당 코드로 저장된 클라우드 데이터를 찾지 못했습니다.');
           return;
         }
-        state = {
-          ...createInitialState(),
-          ...rows[0].room_data
-        };
+        state = normalizeImportedState(loadedData);
+        state.settings.syncCode = rawCode;
         saveState();
         renderAll();
         statusEl.textContent = `클라우드 동기화 완료 · ${new Date().toLocaleTimeString()}`;
@@ -3273,32 +3362,49 @@
       { daysAgo: 5, title: '충전 및 영화 감상', start: '20:00', end: '22:00', cat: 'cat_rest' }
     ];
 
+    let addedCount = 0;
     sampleItems.forEach(item => {
       const dStr = addDaysStr(today, -item.daysAgo);
-      state.schedules.push({
-        id: uid('sch'),
-        title: item.title,
-        date: dStr,
-        startTime: item.start,
-        endTime: item.end,
-        categoryId: item.cat,
-        alarm: false,
-        important: false,
-        completed: true
-      });
-      state.actualLogs.push({
-        id: uid('act'),
-        title: item.title,
-        date: dStr,
-        startTime: item.start,
-        endTime: item.end,
-        categoryId: item.cat
-      });
+      const planExists = state.schedules.some(
+        s => s.date === dStr && s.title === item.title && s.startTime === item.start
+      );
+      if (!planExists) {
+        state.schedules.push({
+          id: uid('sch'),
+          title: item.title,
+          date: dStr,
+          startTime: item.start,
+          endTime: item.end,
+          categoryId: item.cat,
+          alarm: false,
+          important: false,
+          completed: true
+        });
+      }
+      const actualExists = state.actualLogs.some(
+        a => a.date === dStr && a.title === item.title && a.startTime === item.start
+      );
+      if (!actualExists) {
+        state.actualLogs.push({
+          id: uid('act'),
+          title: item.title,
+          date: dStr,
+          startTime: item.start,
+          endTime: item.end,
+          categoryId: item.cat
+        });
+        addedCount++;
+      }
     });
+
+    if (addedCount === 0) {
+      showToast('이미 이번 달 타임트래커 예시 기록이 반영되어 있습니다.');
+      return;
+    }
 
     saveState();
     renderAll();
-    showToast('이번 달 타임트래커 예시 기록 10건이 추가되어 분석 차트가 업데이트되었습니다.');
+    showToast(`이번 달 타임트래커 예시 기록 ${addedCount}건이 추가되어 분석 차트가 업데이트되었습니다.`);
   }
 
   // -------------------- 탭 전환 및 유틸리티 --------------------
@@ -3411,6 +3517,7 @@
       } else {
         selectedDate = addDaysStr(selectedDate, -1);
       }
+      syncCalCursorsToSelectedDate(true);
       renderAll();
     });
     document.getElementById('nextDayBtn').addEventListener('click', () => {
@@ -3421,6 +3528,7 @@
       } else {
         selectedDate = addDaysStr(selectedDate, 1);
       }
+      syncCalCursorsToSelectedDate(true);
       renderAll();
     });
     document.getElementById('goTodayBtn').addEventListener('click', () => {
@@ -3501,12 +3609,28 @@
       const date = document.getElementById('itemModalDate').value || selectedDate;
       const categoryId = document.getElementById('itemModalCategory').value;
       const startTime = document.getElementById('itemModalStartTime').value || '09:00';
-      const endTime = document.getElementById('itemModalEndTime').value || '10:00';
+      let endTime = document.getElementById('itemModalEndTime').value || '10:00';
       const alarm = document.getElementById('itemModalAlarm').checked;
       const important = document.getElementById('itemModalImportant').checked;
 
-      // 기존 항목이면 제거 후 재삽입
+      // 종료 시각이 시작 시각보다 빠르거나 같을 경우 자동으로 30분 뒤로 보정
+      if (type !== 'todo' && timeToMinutes(endTime) <= timeToMinutes(startTime)) {
+        endTime = minutesToTime(timeToMinutes(startTime) + 30);
+      }
+
+      // 기존 항목이면 완료 여부 및 예상 소요 시간을 보존한 뒤 교체
+      let prevCompleted = false;
+      let prevEstimatedMinutes = 30;
       if (id) {
+        const prevItem =
+          state.schedules.find(x => x.id === id) ||
+          state.todos.find(x => x.id === id);
+        if (prevItem) {
+          prevCompleted = Boolean(prevItem.completed);
+          if (prevItem.estimatedMinutes) {
+            prevEstimatedMinutes = Number(prevItem.estimatedMinutes);
+          }
+        }
         state.schedules = state.schedules.filter(x => x.id !== id);
         state.actualLogs = state.actualLogs.filter(x => x.id !== id);
         state.todos = state.todos.filter(x => x.id !== id);
@@ -3522,7 +3646,7 @@
           categoryId,
           alarm,
           important,
-          completed: false
+          completed: prevCompleted
         });
       } else if (type === 'actual') {
         state.actualLogs.push({
@@ -3539,9 +3663,9 @@
           title,
           dueDate: date,
           categoryId,
-          estimatedMinutes: 30,
+          estimatedMinutes: prevEstimatedMinutes,
           important,
-          completed: false
+          completed: prevCompleted
         });
       }
 
@@ -3635,7 +3759,10 @@
           target.categoryId = categoryId;
           target.startTime = startTime;
           target.alarm = alarm;
-          target.steps = steps;
+          target.steps = steps.length > 0 ? steps : [{ id: uid('st'), title: '핵심 행동', minutes: 5, tip: '' }];
+          if (routinePlayer.activeRoutineId === id && routinePlayer.stepIndex >= target.steps.length) {
+            routinePlayer.stepIndex = Math.max(0, target.steps.length - 1);
+          }
         }
       } else {
         state.routines.push({
@@ -3645,7 +3772,7 @@
           startTime,
           alarm,
           completedDates: [],
-          steps
+          steps: steps.length > 0 ? steps : [{ id: uid('st'), title: '핵심 행동', minutes: 5, tip: '' }]
         });
       }
 
@@ -3658,6 +3785,9 @@
     document.getElementById('routineModalDeleteBtn').addEventListener('click', () => {
       const id = document.getElementById('routineModalId').value;
       if (!id) return;
+      if (routinePlayer.running && routinePlayer.activeRoutineId === id) {
+        stopRoutinePlayerEarly();
+      }
       state.routines = state.routines.filter(r => r.id !== id);
       document.getElementById('routineModal').classList.add('hidden');
       saveState();
@@ -3668,7 +3798,17 @@
     // 탭 3: 주간·월간 달력 네비게이션 및 보기 옵션
     document.querySelectorAll('#calPrimaryViewTabs [data-calview]').forEach(btn => {
       btn.addEventListener('click', () => {
-        currentCalView = btn.dataset.calview;
+        const nextView = btn.dataset.calview;
+        if (nextView === 'month') {
+          syncCalCursorsToSelectedDate(true);
+        } else if (nextView === 'week') {
+          const [sy, sm] = selectedDate.split('-').map(Number);
+          if (sy !== fullCalCursor.getFullYear() || sm - 1 !== fullCalCursor.getMonth()) {
+            selectedDate = toDateStr(new Date(fullCalCursor.getFullYear(), fullCalCursor.getMonth(), 1));
+            syncCalCursorsToSelectedDate(false);
+          }
+        }
+        currentCalView = nextView;
         renderCalendarOverviewTab();
       });
     });
@@ -3708,6 +3848,7 @@
         fullCalCursor = new Date(fullCalCursor.getFullYear(), fullCalCursor.getMonth() - 1, 1);
       } else {
         selectedDate = addDaysStr(selectedDate, -7);
+        syncCalCursorsToSelectedDate(true);
       }
       renderCalendarOverviewTab();
     });
@@ -3716,6 +3857,7 @@
         fullCalCursor = new Date(fullCalCursor.getFullYear(), fullCalCursor.getMonth() + 1, 1);
       } else {
         selectedDate = addDaysStr(selectedDate, 7);
+        syncCalCursorsToSelectedDate(true);
       }
       renderCalendarOverviewTab();
     });
@@ -3856,24 +3998,43 @@
       reader.onload = ev => {
         try {
           const imported = JSON.parse(String(ev.target.result));
-          state = { ...createInitialState(), ...imported };
+          state = normalizeImportedState(imported);
           saveState();
           renderAll();
           document.getElementById('syncModal').classList.add('hidden');
           showToast('백업 파일을 성공적으로 불러왔습니다!');
         } catch (_) {
           showToast('유효한 JSON 백업 파일이 아닙니다.');
+        } finally {
+          e.target.value = '';
         }
       };
       reader.readAsText(file);
     });
 
-    // 공통 모달 닫기 버튼
+    // 공통 모달 닫기 버튼 + 배경 클릭 및 Escape 키 닫기 지원
     document.querySelectorAll('[data-close]').forEach(btn => {
       btn.addEventListener('click', () => {
         const targetId = btn.dataset.close;
         document.getElementById(targetId)?.classList.add('hidden');
       });
+    });
+
+    ['itemModal', 'routineModal', 'categoryModal', 'syncModal'].forEach(modalId => {
+      const backdropEl = document.getElementById(modalId);
+      backdropEl?.addEventListener('click', e => {
+        if (e.target === backdropEl) {
+          backdropEl.classList.add('hidden');
+        }
+      });
+    });
+
+    document.addEventListener('keydown', e => {
+      if (e.key === 'Escape') {
+        ['itemModal', 'routineModal', 'categoryModal', 'syncModal'].forEach(modalId => {
+          document.getElementById(modalId)?.classList.add('hidden');
+        });
+      }
     });
   }
 
