@@ -238,37 +238,82 @@
           </section>
         </div>
 
-        <!-- 중앙: 계획 대 실행 듀얼 타임트래커 타임라인 -->
+        <!-- 중앙: 계획 대 실행 듀얼 타임트래커 타임라인 (일별 · 주별 · 월별 통합 전환) -->
         <div class="dash-col dash-center">
           <section class="panel-card timeline-panel">
             <div class="panel-head timeline-head">
               <div>
                 <div class="selected-date-heading">
-                  <button type="button" id="prevDayBtn" class="icon-btn" aria-label="전날">&lsaquo;</button>
+                  <button type="button" id="prevDayBtn" class="icon-btn" aria-label="이전 기간">&lsaquo;</button>
                   <h2 id="timelineDateTitle" class="panel-title">11월 9일 월요일</h2>
-                  <button type="button" id="nextDayBtn" class="icon-btn" aria-label="다음날">&rsaquo;</button>
+                  <button type="button" id="nextDayBtn" class="icon-btn" aria-label="다음 기간">&rsaquo;</button>
                 </div>
-                <p class="panel-subdesc">좌측 열은 계획 일정, 우측 열은 실제 사용 시간입니다. 빈 칸을 누르면 바로 추가됩니다.</p>
+                <p id="timelineSubdesc" class="panel-subdesc">좌측 열은 계획 일정, 우측 열은 실제 사용 시간입니다. 빈 칸을 누르면 바로 추가됩니다.</p>
               </div>
               <div class="timeline-head-actions">
+                <div class="scope-seg-group" id="dashScopeTabs" role="tablist" aria-label="기간 단위 선택">
+                  <button type="button" class="scope-seg-btn active" data-dashscope="day">일별</button>
+                  <button type="button" class="scope-seg-btn" data-dashscope="week">주별</button>
+                  <button type="button" class="scope-seg-btn" data-dashscope="month">월별</button>
+                </div>
                 <button type="button" id="openAddScheduleBtn" class="btn-xs btn-primary">일정 추가</button>
                 <button type="button" id="openAddActualBtn" class="btn-xs btn-teal">실제 시간 기록</button>
                 <button type="button" id="aiRescheduleBtn" class="btn-xs btn-ai" title="밀린 오늘 일정을 현재 시각 기준으로 재배치합니다">AI 남은 일정 재배치</button>
               </div>
             </div>
 
+            <!-- 일별·주별 표시 모드 선택 바: 계획+진행 / 계획만 / 진행만 -->
+            <div id="dashTrackModeBar" class="view-mode-bar">
+              <div class="view-mode-left">
+                <span class="mode-bar-label">보기 선택</span>
+                <div class="mode-pill-group" id="dashTrackModeTabs">
+                  <button type="button" class="mode-pill-btn active" data-dashtrack="both">계획 + 진행</button>
+                  <button type="button" class="mode-pill-btn" data-dashtrack="plan">계획만</button>
+                  <button type="button" class="mode-pill-btn" data-dashtrack="actual">진행만</button>
+                </div>
+              </div>
+              <div id="dashTrackSummaryText" class="view-mode-summary">계획 0분 · 진행 0분</div>
+            </div>
+
+            <!-- 월별 표시 기준 선택 바: 주요 일정 및 할 일 마감 중심 -->
+            <div id="dashMonthModeBar" class="view-mode-bar hidden">
+              <div class="view-mode-left">
+                <span class="mode-bar-label">월별 필터</span>
+                <div class="mode-pill-group" id="dashMonthModeTabs">
+                  <button type="button" class="mode-pill-btn active" data-dashmonth="focus">주요 일정 · 마감 중심</button>
+                  <button type="button" class="mode-pill-btn" data-dashmonth="all">전체 보기</button>
+                  <button type="button" class="mode-pill-btn" data-dashmonth="important">주요 일정만</button>
+                  <button type="button" class="mode-pill-btn" data-dashmonth="deadline">할 일 마감만</button>
+                </div>
+              </div>
+              <button type="button" id="dashOpenFullCalBtn" class="btn-xs btn-outline">넓은 화면으로 보기</button>
+            </div>
+
             <!-- 카테고리 범례 바 -->
             <div id="timelineCategoryLegend" class="category-legend-bar"></div>
 
-            <!-- 듀얼 타임라인 헤더 -->
-            <div class="dual-timeline-header">
-              <div class="dt-time-col">시간</div>
-              <div class="dt-plan-col">계획 일정</div>
-              <div class="dt-actual-col">실제 사용 시간</div>
+            <!-- 1. 일별 타임라인 컨테이너 -->
+            <div id="dashDayViewWrap">
+              <div id="dualTimelineHeader" class="dual-timeline-header">
+                <div class="dt-time-col">시간</div>
+                <div id="dtHeaderPlanCol" class="dt-plan-col">계획 일정</div>
+                <div id="dtHeaderActualCol" class="dt-actual-col">실제 진행 시간</div>
+              </div>
+              <div id="dualTimelineScroll" class="dual-timeline-scroll"></div>
             </div>
 
-            <!-- 06:00 ~ 24:00 타임라인 스크롤 영역 -->
-            <div id="dualTimelineScroll" class="dual-timeline-scroll"></div>
+            <!-- 2. 주별 타임트래커 컨테이너 -->
+            <div id="dashWeekViewWrap" class="hidden">
+              <div id="dashWeekGrid" class="dash-week-grid"></div>
+            </div>
+
+            <!-- 3. 월별 주요 일정 · 할 일 마감 컨테이너 -->
+            <div id="dashMonthViewWrap" class="hidden">
+              <div class="month-cal-weekdays compact">
+                <span>일</span><span>월</span><span>화</span><span>수</span><span>목</span><span>금</span><span>토</span>
+              </div>
+              <div id="dashMonthGrid" class="month-cal-grid compact"></div>
+            </div>
           </section>
         </div>
 
@@ -406,16 +451,55 @@
     <section id="tab-calendar" class="tab-view">
       <div class="calendar-overview-layout">
         <div class="panel-card calendar-main-card">
-          <div class="panel-head">
+          <div class="panel-head calendar-top-head">
             <div class="date-nav-row">
               <button type="button" id="calPrevBtn" class="icon-btn" aria-label="이전 기간">&lsaquo;</button>
               <h2 id="calHeaderTitle" class="panel-title">2026년 11월</h2>
               <button type="button" id="calNextBtn" class="icon-btn" aria-label="다음 기간">&rsaquo;</button>
+              <button type="button" id="calTodayBtn" class="btn-xs btn-ghost">오늘로 이동</button>
             </div>
-            <div class="cal-view-switch">
-              <button type="button" class="filter-pill active" data-calview="month">월간 달력</button>
-              <button type="button" class="filter-pill" data-calview="week">주간 타임 매트릭스</button>
+            <div class="cal-head-right">
+              <div class="scope-seg-group" id="calPrimaryViewTabs">
+                <button type="button" class="scope-seg-btn" data-calview="week">주별 보기</button>
+                <button type="button" class="scope-seg-btn active" data-calview="month">월별 보기</button>
+              </div>
+              <button type="button" id="calAddScheduleBtn" class="btn-xs btn-primary">일정 추가</button>
+              <button type="button" id="calAddTodoBtn" class="btn-xs btn-outline">할 일 마감 추가</button>
+              <button type="button" id="calAddActualBtn" class="btn-xs btn-teal">실제 시간 기록</button>
             </div>
+          </div>
+
+          <!-- 월별 보기 전용 서브 툴바 -->
+          <div id="calMonthToolbar" class="view-mode-bar">
+            <div class="view-mode-left">
+              <span class="mode-bar-label">월별 표시</span>
+              <div class="mode-pill-group" id="calMonthFilterTabs">
+                <button type="button" class="mode-pill-btn active" data-monthmode="focus">주요 일정 · 마감 중심</button>
+                <button type="button" class="mode-pill-btn" data-monthmode="all">전체 보기</button>
+                <button type="button" class="mode-pill-btn" data-monthmode="important">주요 일정만</button>
+                <button type="button" class="mode-pill-btn" data-monthmode="deadline">할 일 마감만</button>
+              </div>
+            </div>
+            <div id="calMonthSummaryBadges" class="view-mode-summary">주요 일정 0건 · 할 일 마감 0건</div>
+          </div>
+
+          <!-- 주별 보기 전용 서브 툴바 -->
+          <div id="calWeekToolbar" class="view-mode-bar hidden">
+            <div class="view-mode-left">
+              <span class="mode-bar-label">주별 표시</span>
+              <div class="mode-pill-group" id="calWeekTrackTabs">
+                <button type="button" class="mode-pill-btn active" data-weekmode="both">계획 + 진행</button>
+                <button type="button" class="mode-pill-btn" data-weekmode="plan">계획만</button>
+                <button type="button" class="mode-pill-btn" data-weekmode="actual">진행만</button>
+              </div>
+              <span class="mode-bar-divider"></span>
+              <span class="mode-bar-label">레이아웃</span>
+              <div class="mode-pill-group" id="calWeekLayoutTabs">
+                <button type="button" class="mode-pill-btn active" data-weeklayout="board">요일별 보드</button>
+                <button type="button" class="mode-pill-btn" data-weeklayout="timetable">시간대별 표</button>
+              </div>
+            </div>
+            <div id="calWeekSummaryBadges" class="view-mode-summary">주간 계획 0시간 · 주간 진행 0시간</div>
           </div>
 
           <!-- 월간 달력 뷰 -->
@@ -429,16 +513,22 @@
           <!-- 주간 타임 매트릭스 뷰 -->
           <div id="weekMatrixView" class="week-matrix-container hidden">
             <div id="weekMatrixGrid" class="week-matrix-grid"></div>
+            <div id="weekTimetableWrap" class="week-timetable-wrap hidden"></div>
           </div>
         </div>
 
-        <!-- 우측: 이번 달 주요 일정 및 마감 할 일 한눈에 보기 -->
+        <!-- 우측: 주요 일정 및 마감 할 일 한눈에 보기 -->
         <aside class="panel-card calendar-side-card">
           <div class="panel-head">
             <div>
-              <h2 class="panel-title">주요 일정 및 마감 목록</h2>
-              <p class="panel-subdesc">날짜를 클릭하면 해당 날짜의 타임트래커로 이동합니다.</p>
+              <h2 class="panel-title">주요 일정 및 할 일 마감</h2>
+              <p class="panel-subdesc">항목을 누르면 상세 편집이나 일별 타임라인으로 이동합니다.</p>
             </div>
+          </div>
+          <div class="filter-tabs" id="milestoneFilterTabs">
+            <button type="button" class="filter-pill active" data-msfilter="all">전체</button>
+            <button type="button" class="filter-pill" data-msfilter="important">주요 일정</button>
+            <button type="button" class="filter-pill" data-msfilter="deadline">할 일 마감</button>
           </div>
           <div id="upcomingMilestoneList" class="milestone-list"></div>
         </aside>

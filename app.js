@@ -27,6 +27,56 @@
     return toDateStr(dt);
   }
 
+  function addMonthsStr(dateStr, deltaMonths) {
+    const [y, m, d] = dateStr.split('-').map(Number);
+    const targetMonthDate = new Date(y, m - 1 + deltaMonths, 1);
+    const maxDay = new Date(targetMonthDate.getFullYear(), targetMonthDate.getMonth() + 1, 0).getDate();
+    return toDateStr(new Date(targetMonthDate.getFullYear(), targetMonthDate.getMonth(), Math.min(d, maxDay)));
+  }
+
+  function getWeekRangeFromDateStr(dateStr) {
+    const [y, m, d] = dateStr.split('-').map(Number);
+    const base = new Date(y, m - 1, d);
+    const dayOfWeek = base.getDay();
+    const sunday = new Date(y, m - 1, d - dayOfWeek);
+    const saturday = new Date(y, m - 1, d - dayOfWeek + 6);
+    const dayNames = ['일', '월', '화', '수', '목', '금', '토'];
+    const days = [];
+    for (let i = 0; i < 7; i++) {
+      const cur = new Date(sunday.getFullYear(), sunday.getMonth(), sunday.getDate() + i);
+      days.push({
+        dateObj: cur,
+        dateStr: toDateStr(cur),
+        dayName: dayNames[i],
+        dayIdx: i,
+        monthDayLabel: `${cur.getMonth() + 1}/${cur.getDate()}`
+      });
+    }
+    return {
+      sunday,
+      saturday,
+      sundayStr: toDateStr(sunday),
+      saturdayStr: toDateStr(saturday),
+      titleLabel: `${sunday.getMonth() + 1}월 ${sunday.getDate()}일 ~ ${saturday.getMonth() + 1}월 ${saturday.getDate()}일`,
+      days
+    };
+  }
+
+  function getDdayBadgeInfo(targetDateStr, isCompleted) {
+    if (isCompleted) return { text: '완료', cls: 'dday-done' };
+    if (!targetDateStr) return { text: '기한 미정', cls: 'dday-muted' };
+    const today = getTodayStr();
+    const [ty, tm, td] = today.split('-').map(Number);
+    const [dy, dm, dd] = targetDateStr.split('-').map(Number);
+    const t0 = new Date(ty, tm - 1, td).getTime();
+    const t1 = new Date(dy, dm - 1, dd).getTime();
+    const diffDays = Math.round((t1 - t0) / 86400000);
+    if (diffDays === 0) return { text: '오늘 마감', cls: 'dday-today' };
+    if (diffDays > 0 && diffDays <= 3) return { text: `D-${diffDays}`, cls: 'dday-soon' };
+    if (diffDays > 3) return { text: `D-${diffDays}`, cls: 'dday-future' };
+    return { text: `${Math.abs(diffDays)}일 경과`, cls: 'dday-overdue' };
+  }
+
   function getNowTimeStr() {
     const now = new Date();
     return `${String(now.getHours()).padStart(2, '0')}:${String(now.getMinutes()).padStart(2, '0')}`;
@@ -156,6 +206,50 @@
           alarm: true,
           important: true,
           completed: false
+        },
+        {
+          id: 'sch_7',
+          title: '핵심 역량 온라인 강의 집중 수강',
+          date: addDaysStr(today, 2),
+          startTime: '20:00',
+          endTime: '21:30',
+          categoryId: 'cat_study',
+          alarm: true,
+          important: true,
+          completed: false
+        },
+        {
+          id: 'sch_8',
+          title: '월간 프로젝트 중간 발표 및 리뷰',
+          date: addDaysStr(today, 4),
+          startTime: '14:00',
+          endTime: '16:00',
+          categoryId: 'cat_work',
+          alarm: true,
+          important: true,
+          completed: false
+        },
+        {
+          id: 'sch_9',
+          title: '주말 코어 근력 및 유산소 러닝',
+          date: addDaysStr(today, 5),
+          startTime: '10:00',
+          endTime: '11:30',
+          categoryId: 'cat_health',
+          alarm: false,
+          important: false,
+          completed: false
+        },
+        {
+          id: 'sch_10',
+          title: '업무 문서 정리 및 이메일 회신',
+          date: yesterday,
+          startTime: '09:30',
+          endTime: '12:00',
+          categoryId: 'cat_work',
+          alarm: false,
+          important: false,
+          completed: true
         }
       ],
       actualLogs: [
@@ -216,6 +310,33 @@
           dueDate: today,
           categoryId: 'cat_routine',
           estimatedMinutes: 20,
+          important: false,
+          completed: false
+        },
+        {
+          id: 'todo_5',
+          title: '기획안 최종본 제출 마감',
+          dueDate: tomorrow,
+          categoryId: 'cat_work',
+          estimatedMinutes: 60,
+          important: true,
+          completed: false
+        },
+        {
+          id: 'todo_6',
+          title: '직무 자격증 모의고사 풀이 마감',
+          dueDate: addDaysStr(today, 3),
+          categoryId: 'cat_study',
+          estimatedMinutes: 50,
+          important: true,
+          completed: false
+        },
+        {
+          id: 'todo_7',
+          title: '월간 지출 정산 및 영수증 정리',
+          dueDate: addDaysStr(today, 6),
+          categoryId: 'cat_routine',
+          estimatedMinutes: 30,
           important: false,
           completed: false
         },
@@ -307,7 +428,21 @@
   let selectedDate = getTodayStr();
   let miniCalCursor = new Date();
   let fullCalCursor = new Date();
+
+  // 대시보드 중앙 타임라인 뷰 상태: 일별(day) / 주별(week) / 월별(month)
+  let dashScope = 'day';
+  // 일별·주별 표시 모드: 계획+진행(both) / 계획만(plan) / 진행만(actual)
+  let dashTrackMode = 'both';
+  // 대시보드 월별 필터: 주요 일정·마감 중심(focus) / 전체(all) / 주요 일정만(important) / 할 일 마감만(deadline)
+  let dashMonthMode = 'focus';
+
+  // 탭 3 주간·월간 전체 조망 상태
   let currentCalView = 'month';
+  let calWeekMode = 'both';
+  let calWeekLayout = 'board';
+  let calMonthMode = 'focus';
+  let currentMilestoneFilter = 'all';
+
   let currentTodoFilter = 'today';
   let currentReportPeriod = 'thisMonth';
 
@@ -349,13 +484,27 @@
       if (!raw) return createInitialState();
       const parsed = JSON.parse(raw);
       const fallback = createInitialState();
-      return {
+      const merged = {
         ...fallback,
         ...parsed,
         settings: { ...fallback.settings, ...(parsed.settings || {}) },
         reviewNotes: { ...fallback.reviewNotes, ...(parsed.reviewNotes || {}) },
         timeBudgets: { ...fallback.timeBudgets, ...(parsed.timeBudgets || {}) }
       };
+      if (!merged.settings.weeklyMonthlySeeded) {
+        fallback.schedules.forEach(fs => {
+          if (!merged.schedules.some(s => s.id === fs.id)) {
+            merged.schedules.push(fs);
+          }
+        });
+        fallback.todos.forEach(ft => {
+          if (!merged.todos.some(t => t.id === ft.id)) {
+            merged.todos.push(ft);
+          }
+        });
+        merged.settings.weeklyMonthlySeeded = true;
+      }
+      return merged;
     } catch (_) {
       return createInitialState();
     }
@@ -829,10 +978,98 @@
     });
   }
 
-  // -------------------- 중앙: 계획 대 실행 듀얼 타임트래커 렌더링 --------------------
+  // -------------------- 중앙: 일별 · 주별 · 월별 통합 타임트래커 렌더링 --------------------
   function renderDualTimeline() {
+    const dayWrap = document.getElementById('dashDayViewWrap');
+    const weekWrap = document.getElementById('dashWeekViewWrap');
+    const monthWrap = document.getElementById('dashMonthViewWrap');
+    const trackBar = document.getElementById('dashTrackModeBar');
+    const monthBar = document.getElementById('dashMonthModeBar');
+    const tlTitle = document.getElementById('timelineDateTitle');
+    const tlSub = document.getElementById('timelineSubdesc');
+    const summaryEl = document.getElementById('dashTrackSummaryText');
+
+    if (!dayWrap || !weekWrap || !monthWrap) return;
+
+    // 탭 활성 상태 동기화
+    document.querySelectorAll('#dashScopeTabs [data-dashscope]').forEach(btn => {
+      btn.classList.toggle('active', btn.dataset.dashscope === dashScope);
+    });
+    document.querySelectorAll('#dashTrackModeTabs [data-dashtrack]').forEach(btn => {
+      btn.classList.toggle('active', btn.dataset.dashtrack === dashTrackMode);
+    });
+    document.querySelectorAll('#dashMonthModeTabs [data-dashmonth]').forEach(btn => {
+      btn.classList.toggle('active', btn.dataset.dashmonth === dashMonthMode);
+    });
+
+    if (dashScope === 'day') {
+      dayWrap.classList.remove('hidden');
+      weekWrap.classList.add('hidden');
+      monthWrap.classList.add('hidden');
+      trackBar.classList.remove('hidden');
+      monthBar.classList.add('hidden');
+
+      tlTitle.textContent = formatDateHeadingKo(selectedDate);
+      if (dashTrackMode === 'both') {
+        tlSub.textContent = '좌측 열은 계획 일정, 우측 열은 실제 진행 시간입니다. 빈 칸을 누르면 바로 추가됩니다.';
+      } else if (dashTrackMode === 'plan') {
+        tlSub.textContent = '선택한 날짜의 계획 일정만 집중해서 봅니다. 빈 시간대를 눌러 일정을 추가하세요.';
+      } else {
+        tlSub.textContent = '선택한 날짜에 실제로 진행하고 기록한 타임트래커 내역만 모아 봅니다.';
+      }
+
+      renderDayDualTimeline(summaryEl);
+    } else if (dashScope === 'week') {
+      dayWrap.classList.add('hidden');
+      weekWrap.classList.remove('hidden');
+      monthWrap.classList.add('hidden');
+      trackBar.classList.remove('hidden');
+      monthBar.classList.add('hidden');
+
+      const weekInfo = getWeekRangeFromDateStr(selectedDate);
+      tlTitle.textContent = `${weekInfo.titleLabel} 주간`;
+      if (dashTrackMode === 'both') {
+        tlSub.textContent = '한 주간의 계획 일정과 실제 진행 기록을 요일별로 함께 비교합니다.';
+      } else if (dashTrackMode === 'plan') {
+        tlSub.textContent = '한 주간의 계획 일정과 할 일 마감만 모아 봅니다.';
+      } else {
+        tlSub.textContent = '한 주간의 실제 진행 시간 기록만 모아 봅니다.';
+      }
+
+      const dashWeekGrid = document.getElementById('dashWeekGrid');
+      const stats = renderWeeklyBoardInto(dashWeekGrid, weekInfo, dashTrackMode, true);
+      if (summaryEl) {
+        summaryEl.textContent = `주간 계획 ${formatDurationKo(stats.totalPlanMins)} · 진행 ${formatDurationKo(stats.totalActualMins)}`;
+      }
+    } else {
+      dayWrap.classList.add('hidden');
+      weekWrap.classList.add('hidden');
+      monthWrap.classList.remove('hidden');
+      trackBar.classList.add('hidden');
+      monthBar.classList.remove('hidden');
+
+      const [sy, sm] = selectedDate.split('-').map(Number);
+      tlTitle.textContent = `${sy}년 ${sm}월 주요 일정 · 마감`;
+      tlSub.textContent = '이번 달 주요 일정과 할 일 마감을 중심으로 한눈에 파악합니다.';
+
+      const dashMonthGrid = document.getElementById('dashMonthGrid');
+      renderMonthlyGridInto(dashMonthGrid, sy, sm - 1, dashMonthMode, true);
+    }
+  }
+
+  function renderDayDualTimeline(summaryEl) {
     const scrollEl = document.getElementById('dualTimelineScroll');
-    if (!scrollEl) return;
+    const headerEl = document.getElementById('dualTimelineHeader');
+    const headerPlanCol = document.getElementById('dtHeaderPlanCol');
+    const headerActualCol = document.getElementById('dtHeaderActualCol');
+    if (!scrollEl || !headerEl) return;
+
+    const showPlan = dashTrackMode === 'both' || dashTrackMode === 'plan';
+    const showActual = dashTrackMode === 'both' || dashTrackMode === 'actual';
+
+    headerEl.classList.toggle('single-col', dashTrackMode !== 'both');
+    headerPlanCol.classList.toggle('hidden', !showPlan);
+    headerActualCol.classList.toggle('hidden', !showActual);
 
     const dayPlans = state.schedules
       .filter(s => s.date === selectedDate)
@@ -841,6 +1078,12 @@
     const dayActuals = state.actualLogs
       .filter(a => a.date === selectedDate)
       .sort((a, b) => timeToMinutes(a.startTime) - timeToMinutes(b.startTime));
+
+    const totalPlanMins = dayPlans.reduce((s, x) => s + durationMinutes(x.startTime, x.endTime), 0);
+    const totalActualMins = dayActuals.reduce((s, x) => s + durationMinutes(x.startTime, x.endTime), 0);
+    if (summaryEl) {
+      summaryEl.textContent = `오늘 계획 ${formatDurationKo(totalPlanMins)} · 진행 ${formatDurationKo(totalActualMins)}`;
+    }
 
     const currentHour = new Date().getHours();
     const isToday = selectedDate === getTodayStr();
@@ -851,123 +1094,115 @@
       const hourStr = `${String(hour).padStart(2, '0')}:00`;
       const nextHourStr = `${String(hour + 1).padStart(2, '0')}:00`;
       const row = document.createElement('div');
-      row.className = `dt-hour-row ${isToday && hour === currentHour ? 'current-hour-row' : ''}`;
+      row.className = `dt-hour-row ${dashTrackMode !== 'both' ? 'single-col' : ''} ${isToday && hour === currentHour ? 'current-hour-row' : ''}`;
 
-      // 해당 시간대에 시작하거나 걸쳐 있는 계획/실제 블록 찾기
-      const plansInHour = dayPlans.filter(p => {
-        const sH = Math.floor(timeToMinutes(p.startTime) / 60);
-        return sH === hour;
-      });
+      const plansInHour = dayPlans.filter(p => Math.floor(timeToMinutes(p.startTime) / 60) === hour);
+      const actualsInHour = dayActuals.filter(a => Math.floor(timeToMinutes(a.startTime) / 60) === hour);
 
-      const actualsInHour = dayActuals.filter(a => {
-        const sH = Math.floor(timeToMinutes(a.startTime) / 60);
-        return sH === hour;
-      });
-
-      // 시간 라벨 열
       const timeCol = document.createElement('div');
       timeCol.className = 'dt-hour-label';
       timeCol.textContent = hourStr;
-
-      // 계획 열
-      const planCol = document.createElement('div');
-      planCol.className = 'dt-slot-cell';
-      if (plansInHour.length === 0) {
-        planCol.innerHTML = `<span class="dt-empty-hint">+ ${hourStr} 계획 추가</span>`;
-      } else {
-        plansInHour.forEach(p => {
-          const cat = getCategoryById(p.categoryId);
-          const block = document.createElement('div');
-          block.className = 'timeline-block';
-          block.style.background = `${cat.color}16`;
-          block.style.borderLeftColor = cat.color;
-          block.innerHTML = `
-            <div class="tb-info">
-              <span class="tb-time" style="color:${cat.color}">
-                ${p.startTime} ~ ${p.endTime} ${p.alarm ? '🔔' : ''} ${p.important ? '★' : ''}
-              </span>
-              <span class="tb-title">${escapeHtml(p.title)}</span>
-            </div>
-            <div class="tb-actions">
-              <button type="button" class="tb-mini-btn plan-run-btn" title="이 일정을 지금 시작하고 실제 시간을 측정합니다">시작</button>
-              <button type="button" class="tb-mini-btn plan-done-btn" title="계획 일정과 동일한 시간으로 실제 사용 시간에 즉시 기록합니다">${p.completed ? '완료됨' : '완료 기록'}</button>
-            </div>
-          `;
-          block.addEventListener('click', e => {
-            if (e.target.closest('button')) return;
-            openItemModalForEdit('schedule', p);
-          });
-          block.querySelector('.plan-run-btn').addEventListener('click', e => {
-            e.stopPropagation();
-            startLiveTrackerWith(p.title, p.categoryId);
-          });
-          block.querySelector('.plan-done-btn').addEventListener('click', e => {
-            e.stopPropagation();
-            p.completed = !p.completed;
-            if (p.completed) {
-              // 실제 사용 시간(Actual)에도 아직 없으면 자동 기록
-              const exists = state.actualLogs.some(
-                a => a.date === p.date && a.title === p.title && a.startTime === p.startTime
-              );
-              if (!exists) {
-                state.actualLogs.push({
-                  id: uid('act'),
-                  title: p.title,
-                  date: p.date,
-                  startTime: p.startTime,
-                  endTime: p.endTime,
-                  categoryId: p.categoryId
-                });
-                showToast(`'${p.title}' 일정이 실제 사용 시간에 자동 기록되었습니다.`);
-              }
-            }
-            saveState();
-            renderAll();
-          });
-          planCol.appendChild(block);
-        });
-      }
-      planCol.addEventListener('click', e => {
-        if (e.target.closest('.timeline-block')) return;
-        openItemModalForCreate('schedule', hourStr, nextHourStr);
-      });
-
-      // 실제 사용 시간 열
-      const actualCol = document.createElement('div');
-      actualCol.className = 'dt-slot-cell';
-      if (actualsInHour.length === 0) {
-        actualCol.innerHTML = `<span class="dt-empty-hint">+ ${hourStr} 실제 기록</span>`;
-      } else {
-        actualsInHour.forEach(a => {
-          const cat = getCategoryById(a.categoryId);
-          const dur = durationMinutes(a.startTime, a.endTime);
-          const block = document.createElement('div');
-          block.className = 'timeline-block';
-          block.style.background = `${cat.color}24`;
-          block.style.borderLeftColor = cat.color;
-          block.innerHTML = `
-            <div class="tb-info">
-              <span class="tb-time" style="color:${cat.color}">${a.startTime} ~ ${a.endTime} · ${dur}분 기록됨</span>
-              <span class="tb-title">${escapeHtml(a.title)}</span>
-            </div>
-            <div class="tb-actions">
-              <button type="button" class="tb-mini-btn actual-edit-btn">수정</button>
-            </div>
-          `;
-          block.addEventListener('click', () => {
-            openItemModalForEdit('actual', a);
-          });
-          actualCol.appendChild(block);
-        });
-      }
-      actualCol.addEventListener('click', e => {
-        if (e.target.closest('.timeline-block')) return;
-        openItemModalForCreate('actual', hourStr, nextHourStr);
-      });
-
       row.appendChild(timeCol);
-      row.appendChild(planCol);
-      row.appendChild(actualCol);
+
+      if (showPlan) {
+        const planCol = document.createElement('div');
+        planCol.className = 'dt-slot-cell';
+        if (plansInHour.length === 0) {
+          planCol.innerHTML = `<span class="dt-empty-hint">+ ${hourStr} 계획 추가</span>`;
+        } else {
+          plansInHour.forEach(p => {
+            const cat = getCategoryById(p.categoryId);
+            const block = document.createElement('div');
+            block.className = `timeline-block ${p.completed ? 'is-completed-block' : ''}`;
+            block.style.background = `${cat.color}16`;
+            block.style.borderLeftColor = cat.color;
+            block.innerHTML = `
+              <div class="tb-info">
+                <span class="tb-time" style="color:${cat.color}">
+                  ${p.startTime} ~ ${p.endTime} ${p.alarm ? '🔔' : ''} ${p.important ? '★ 중요' : ''}
+                </span>
+                <span class="tb-title">${escapeHtml(p.title)}</span>
+              </div>
+              <div class="tb-actions">
+                <button type="button" class="tb-mini-btn plan-run-btn" title="이 일정을 지금 시작하고 실제 시간을 측정합니다">시작</button>
+                <button type="button" class="tb-mini-btn plan-done-btn" title="계획 일정과 동일한 시간으로 실제 사용 시간에 즉시 기록합니다">${p.completed ? '완료됨' : '완료 기록'}</button>
+              </div>
+            `;
+            block.addEventListener('click', e => {
+              if (e.target.closest('button')) return;
+              openItemModalForEdit('schedule', p);
+            });
+            block.querySelector('.plan-run-btn').addEventListener('click', e => {
+              e.stopPropagation();
+              startLiveTrackerWith(p.title, p.categoryId);
+            });
+            block.querySelector('.plan-done-btn').addEventListener('click', e => {
+              e.stopPropagation();
+              p.completed = !p.completed;
+              if (p.completed) {
+                const exists = state.actualLogs.some(
+                  a => a.date === p.date && a.title === p.title && a.startTime === p.startTime
+                );
+                if (!exists) {
+                  state.actualLogs.push({
+                    id: uid('act'),
+                    title: p.title,
+                    date: p.date,
+                    startTime: p.startTime,
+                    endTime: p.endTime,
+                    categoryId: p.categoryId
+                  });
+                  showToast(`'${p.title}' 일정이 실제 진행 시간에 자동 기록되었습니다.`);
+                }
+              }
+              saveState();
+              renderAll();
+            });
+            planCol.appendChild(block);
+          });
+        }
+        planCol.addEventListener('click', e => {
+          if (e.target.closest('.timeline-block')) return;
+          openItemModalForCreate('schedule', hourStr, nextHourStr);
+        });
+        row.appendChild(planCol);
+      }
+
+      if (showActual) {
+        const actualCol = document.createElement('div');
+        actualCol.className = 'dt-slot-cell';
+        if (actualsInHour.length === 0) {
+          actualCol.innerHTML = `<span class="dt-empty-hint">+ ${hourStr} 실제 기록</span>`;
+        } else {
+          actualsInHour.forEach(a => {
+            const cat = getCategoryById(a.categoryId);
+            const dur = durationMinutes(a.startTime, a.endTime);
+            const block = document.createElement('div');
+            block.className = 'timeline-block';
+            block.style.background = `${cat.color}24`;
+            block.style.borderLeftColor = cat.color;
+            block.innerHTML = `
+              <div class="tb-info">
+                <span class="tb-time" style="color:${cat.color}">${a.startTime} ~ ${a.endTime} · ${dur}분 진행</span>
+                <span class="tb-title">${escapeHtml(a.title)}</span>
+              </div>
+              <div class="tb-actions">
+                <button type="button" class="tb-mini-btn actual-edit-btn">수정</button>
+              </div>
+            `;
+            block.addEventListener('click', () => {
+              openItemModalForEdit('actual', a);
+            });
+            actualCol.appendChild(block);
+          });
+        }
+        actualCol.addEventListener('click', e => {
+          if (e.target.closest('.timeline-block')) return;
+          openItemModalForCreate('actual', hourStr, nextHourStr);
+        });
+        row.appendChild(actualCol);
+      }
+
       scrollEl.appendChild(row);
     }
   }
@@ -1395,37 +1630,94 @@
     banner.classList.add('hidden');
   }
 
-  // -------------------- 탭 3: 주간 · 월간 전체 조망 렌더링 --------------------
+  // -------------------- 탭 3: 주간 · 월간 전체 조망 및 공통 주별/월별 렌더러 --------------------
   function renderCalendarOverviewTab() {
     const year = fullCalCursor.getFullYear();
     const month = fullCalCursor.getMonth();
     const titleEl = document.getElementById('calHeaderTitle');
     const monthView = document.getElementById('monthCalendarView');
     const weekView = document.getElementById('weekMatrixView');
+    const monthToolbar = document.getElementById('calMonthToolbar');
+    const weekToolbar = document.getElementById('calWeekToolbar');
+
+    // 상단 주별/월별 탭 버튼 동기화
+    document.querySelectorAll('#calPrimaryViewTabs [data-calview]').forEach(btn => {
+      btn.classList.toggle('active', btn.dataset.calview === currentCalView);
+    });
+    document.querySelectorAll('#calMonthFilterTabs [data-monthmode]').forEach(btn => {
+      btn.classList.toggle('active', btn.dataset.monthmode === calMonthMode);
+    });
+    document.querySelectorAll('#calWeekTrackTabs [data-weekmode]').forEach(btn => {
+      btn.classList.toggle('active', btn.dataset.weekmode === calWeekMode);
+    });
+    document.querySelectorAll('#calWeekLayoutTabs [data-weeklayout]').forEach(btn => {
+      btn.classList.toggle('active', btn.dataset.weeklayout === calWeekLayout);
+    });
+    document.querySelectorAll('#milestoneFilterTabs [data-msfilter]').forEach(btn => {
+      btn.classList.toggle('active', btn.dataset.msfilter === currentMilestoneFilter);
+    });
 
     if (currentCalView === 'month') {
       monthView.classList.remove('hidden');
       weekView.classList.add('hidden');
-      titleEl.textContent = `${year}년 ${month + 1}월 전체 일정`;
-      renderMonthGrid(year, month);
+      monthToolbar?.classList.remove('hidden');
+      weekToolbar?.classList.add('hidden');
+
+      titleEl.textContent = `${year}년 ${month + 1}월`;
+      const monthGrid = document.getElementById('monthCalendarGrid');
+      const mStats = renderMonthlyGridInto(monthGrid, year, month, calMonthMode, false);
+      const mSummaryEl = document.getElementById('calMonthSummaryBadges');
+      if (mSummaryEl && mStats) {
+        mSummaryEl.textContent = `주요 일정 ${mStats.impCount}건 · 할 일 마감 ${mStats.todoCount}건 · 일반 일정 ${mStats.regCount}건`;
+      }
     } else {
       monthView.classList.add('hidden');
       weekView.classList.remove('hidden');
-      renderWeekMatrix();
+      monthToolbar?.classList.add('hidden');
+      weekToolbar?.classList.remove('hidden');
+
+      const weekInfo = getWeekRangeFromDateStr(selectedDate);
+      titleEl.textContent = `${weekInfo.titleLabel}`;
+
+      const boardGrid = document.getElementById('weekMatrixGrid');
+      const timetableWrap = document.getElementById('weekTimetableWrap');
+
+      if (calWeekLayout === 'timetable') {
+        boardGrid.classList.add('hidden');
+        timetableWrap.classList.remove('hidden');
+        const wStats = renderWeeklyTimetableInto(timetableWrap, weekInfo, calWeekMode);
+        const wSummaryEl = document.getElementById('calWeekSummaryBadges');
+        if (wSummaryEl && wStats) {
+          wSummaryEl.textContent = `주간 계획 ${formatDurationKo(wStats.totalPlanMins)} · 주간 진행 ${formatDurationKo(wStats.totalActualMins)} · 마감 ${wStats.totalTodos}건`;
+        }
+      } else {
+        boardGrid.classList.remove('hidden');
+        timetableWrap.classList.add('hidden');
+        const wStats = renderWeeklyBoardInto(boardGrid, weekInfo, calWeekMode, false);
+        const wSummaryEl = document.getElementById('calWeekSummaryBadges');
+        if (wSummaryEl && wStats) {
+          wSummaryEl.textContent = `주간 계획 ${formatDurationKo(wStats.totalPlanMins)} · 주간 진행 ${formatDurationKo(wStats.totalActualMins)} · 마감 ${wStats.totalTodos}건`;
+        }
+      }
     }
 
     renderUpcomingMilestones();
   }
 
-  function renderMonthGrid(year, month) {
-    const grid = document.getElementById('monthCalendarGrid');
-    if (!grid) return;
+  // 월별 달력 렌더러 (주요 일정 · 할 일 마감 중심 지원)
+  function renderMonthlyGridInto(grid, year, month, mode = 'focus', isCompact = false) {
+    if (!grid) return null;
     grid.innerHTML = '';
 
     const firstDay = new Date(year, month, 1).getDay();
     const daysInMonth = new Date(year, month + 1, 0).getDate();
     const prevMonthDays = new Date(year, month, 0).getDate();
     const todayStr = getTodayStr();
+    const ymPrefix = `${year}-${String(month + 1).padStart(2, '0')}`;
+
+    const impCount = state.schedules.filter(s => s.date.startsWith(ymPrefix) && s.important).length;
+    const regCount = state.schedules.filter(s => s.date.startsWith(ymPrefix) && !s.important).length;
+    const todoCount = state.todos.filter(t => t.dueDate && t.dueDate.startsWith(ymPrefix)).length;
 
     const cells = [];
     for (let i = firstDay - 1; i >= 0; i--) {
@@ -1440,143 +1732,605 @@
       cells.push({ day: nextD, dateStr: toDateStr(new Date(year, month + 1, nextD)), otherMonth: true });
     }
 
-    cells.forEach(cell => {
+    cells.forEach((cell, idx) => {
+      const dow = idx % 7;
       const div = document.createElement('div');
-      div.className = `month-cell ${cell.otherMonth ? 'other-month' : ''} ${cell.dateStr === todayStr ? 'is-today' : ''}`;
+      div.className = [
+        'month-cell',
+        cell.otherMonth ? 'other-month' : '',
+        cell.dateStr === todayStr ? 'is-today' : '',
+        cell.dateStr === selectedDate ? 'is-selected' : '',
+        dow === 0 ? 'sun-cell' : dow === 6 ? 'sat-cell' : ''
+      ]
+        .filter(Boolean)
+        .join(' ');
 
-      const dayPlans = state.schedules.filter(s => s.date === cell.dateStr);
+      const dayTodos = state.todos.filter(t => t.dueDate === cell.dateStr);
+      const daySchedules = state.schedules
+        .filter(s => s.date === cell.dateStr)
+        .sort((a, b) => timeToMinutes(a.startTime) - timeToMinutes(b.startTime));
+      const importantPlans = daySchedules.filter(s => s.important);
+      const regularPlans = daySchedules.filter(s => !s.important);
       const dayActuals = state.actualLogs.filter(a => a.date === cell.dateStr);
       const actualMins = dayActuals.reduce((acc, a) => acc + durationMinutes(a.startTime, a.endTime), 0);
 
-      div.innerHTML = `
-        <div class="mc-date-head">
-          <span>${cell.day}일</span>
-          ${actualMins > 0 ? `<span class="mc-actual-badge">기록 ${formatDurationKo(actualMins)}</span>` : ''}
+      // 상단 날짜 헤더
+      const head = document.createElement('div');
+      head.className = 'mc-date-head';
+
+      const pendingTodoCount = dayTodos.filter(t => !t.completed).length;
+      let rightBadgeHtml = '';
+      if (mode === 'all' && actualMins > 0) {
+        rightBadgeHtml = `<span class="mc-actual-badge">진행 ${formatDurationKo(actualMins)}</span>`;
+      } else if (pendingTodoCount > 0 && mode !== 'important') {
+        rightBadgeHtml = `<span class="mc-deadline-badge">마감 ${pendingTodoCount}</span>`;
+      } else if (importantPlans.length > 0 && mode !== 'deadline') {
+        rightBadgeHtml = `<span class="mc-imp-badge">★ ${importantPlans.length}</span>`;
+      }
+
+      head.innerHTML = `
+        <span class="mc-day-num">${cell.day}일</span>
+        <div class="mc-head-right">
+          ${rightBadgeHtml}
+          <button type="button" class="mc-quick-add-btn" title="이 날짜에 일정 또는 할 일 마감 추가">+</button>
         </div>
-        ${dayPlans
-          .slice(0, 3)
-          .map(p => {
-            const cat = getCategoryById(p.categoryId);
-            return `<div class="mc-event-pill" style="background:${cat.color}20;color:${cat.color}">${p.startTime} ${escapeHtml(p.title)}</div>`;
-          })
-          .join('')}
-        ${dayPlans.length > 3 ? `<div style="font-size:0.7rem;color:#64748B;">외 ${dayPlans.length - 3}건 더보기</div>` : ''}
       `;
+
+      head.querySelector('.mc-quick-add-btn').addEventListener('click', e => {
+        e.stopPropagation();
+        selectedDate = cell.dateStr;
+        openItemModalForCreate(mode === 'deadline' ? 'todo' : 'schedule', '09:00', '10:00');
+      });
+
+      div.appendChild(head);
+
+      // 셀 내부 아이템 목록 구성
+      const stack = document.createElement('div');
+      stack.className = 'mc-items-stack';
+
+      const maxVisible = isCompact ? 3 : 4;
+      let renderedCount = 0;
+
+      // 1. 할 일 마감 렌더링 (focus, all, deadline 모드)
+      if (mode === 'focus' || mode === 'all' || mode === 'deadline') {
+        dayTodos.forEach(todo => {
+          if (renderedCount >= maxVisible) return;
+          renderedCount++;
+          const cat = getCategoryById(todo.categoryId);
+          const pill = document.createElement('div');
+          pill.className = `mc-item-pill mc-todo-pill ${todo.completed ? 'is-done' : ''}`;
+          pill.style.borderLeftColor = cat.color;
+          pill.innerHTML = `
+            <input type="checkbox" class="mc-inline-check" ${todo.completed ? 'checked' : ''} title="할 일 마감 완료 체크" />
+            <span class="mc-tag-chip deadline">마감</span>
+            <span class="mc-item-title">${escapeHtml(todo.title)}</span>
+          `;
+          pill.querySelector('.mc-inline-check').addEventListener('click', e => {
+            e.stopPropagation();
+            todo.completed = e.target.checked;
+            saveState();
+            renderAll();
+          });
+          pill.addEventListener('click', e => {
+            e.stopPropagation();
+            if (e.target.classList.contains('mc-inline-check')) return;
+            openItemModalForEdit('todo', todo);
+          });
+          stack.appendChild(pill);
+        });
+      }
+
+      // 2. 주요 일정 렌더링 (focus, all, important 모드)
+      if (mode === 'focus' || mode === 'all' || mode === 'important') {
+        importantPlans.forEach(plan => {
+          if (renderedCount >= maxVisible) return;
+          renderedCount++;
+          const cat = getCategoryById(plan.categoryId);
+          const pill = document.createElement('div');
+          pill.className = `mc-item-pill mc-imp-pill ${plan.completed ? 'is-done' : ''}`;
+          pill.style.background = `${cat.color}18`;
+          pill.style.borderLeftColor = cat.color;
+          pill.innerHTML = `
+            <span class="mc-tag-chip imp" style="background:${cat.color};color:#FFFFFF;">★ ${plan.startTime}</span>
+            <span class="mc-item-title" style="color:${cat.color};font-weight:700;">${escapeHtml(plan.title)}</span>
+          `;
+          pill.addEventListener('click', e => {
+            e.stopPropagation();
+            openItemModalForEdit('schedule', plan);
+          });
+          stack.appendChild(pill);
+        });
+      }
+
+      // 3. 일반 일정 처리
+      if (mode === 'all') {
+        regularPlans.forEach(plan => {
+          if (renderedCount >= maxVisible) return;
+          renderedCount++;
+          const cat = getCategoryById(plan.categoryId);
+          const pill = document.createElement('div');
+          pill.className = `mc-item-pill mc-reg-pill ${plan.completed ? 'is-done' : ''}`;
+          pill.style.background = `${cat.color}12`;
+          pill.style.borderLeftColor = cat.color;
+          pill.innerHTML = `
+            <span class="mc-reg-time" style="color:${cat.color}">${plan.startTime}</span>
+            <span class="mc-item-title">${escapeHtml(plan.title)}</span>
+          `;
+          pill.addEventListener('click', e => {
+            e.stopPropagation();
+            openItemModalForEdit('schedule', plan);
+          });
+          stack.appendChild(pill);
+        });
+      } else if (mode === 'focus' && regularPlans.length > 0) {
+        // 주요 일정·마감 중심 모드에서는 일반 일정은 간결한 요약 배지로 표시하여 주요 일정과 마감이 돋보이게 함
+        const summaryChip = document.createElement('div');
+        summaryChip.className = 'mc-regular-summary';
+        summaryChip.textContent = `일반 일정 ${regularPlans.length}건`;
+        stack.appendChild(summaryChip);
+      }
+
+      // 초과 항목 안내
+      const totalRelevant =
+        mode === 'deadline'
+          ? dayTodos.length
+          : mode === 'important'
+          ? importantPlans.length
+          : mode === 'focus'
+          ? dayTodos.length + importantPlans.length
+          : dayTodos.length + daySchedules.length;
+
+      if (totalRelevant > maxVisible) {
+        const more = document.createElement('div');
+        more.className = 'mc-more-count';
+        more.textContent = `외 ${totalRelevant - maxVisible}건 더보기`;
+        stack.appendChild(more);
+      }
+
+      div.appendChild(stack);
 
       div.addEventListener('click', () => {
         selectedDate = cell.dateStr;
-        switchTab('dashboard');
+        if (isCompact) {
+          dashScope = 'day';
+        }
         renderAll();
       });
+
       grid.appendChild(div);
     });
+
+    return { impCount, regCount, todoCount };
   }
 
-  function renderWeekMatrix() {
-    const grid = document.getElementById('weekMatrixGrid');
-    const titleEl = document.getElementById('calHeaderTitle');
-    if (!grid) return;
-
-    const [y, m, d] = selectedDate.split('-').map(Number);
-    const base = new Date(y, m - 1, d);
-    const dayOfWeek = base.getDay();
-    const sunday = new Date(y, m - 1, d - dayOfWeek);
-    const saturday = new Date(y, m - 1, d - dayOfWeek + 6);
-
-    titleEl.textContent = `${toDateStr(sunday)} ~ ${toDateStr(saturday)} 주간 매트릭스`;
+  // 주별 요일 보드 렌더러 (계획+진행 / 계획만 / 진행만 지원)
+  function renderWeeklyBoardInto(grid, weekInfo, mode = 'both', isCompact = false) {
+    if (!grid) return { totalPlanMins: 0, totalActualMins: 0, totalTodos: 0 };
     grid.innerHTML = '';
 
-    const dayNames = ['일', '월', '화', '수', '목', '금', '토'];
-    for (let i = 0; i < 7; i++) {
-      const cur = new Date(sunday.getFullYear(), sunday.getMonth(), sunday.getDate() + i);
-      const dStr = toDateStr(cur);
+    const todayStr = getTodayStr();
+    const showPlan = mode === 'both' || mode === 'plan';
+    const showActual = mode === 'both' || mode === 'actual';
+
+    let totalPlanMins = 0;
+    let totalActualMins = 0;
+    let totalTodos = 0;
+
+    weekInfo.days.forEach(dayObj => {
+      const dStr = dayObj.dateStr;
       const plans = state.schedules
         .filter(s => s.date === dStr)
         .sort((a, b) => timeToMinutes(a.startTime) - timeToMinutes(b.startTime));
-      const actuals = state.actualLogs.filter(a => a.date === dStr);
+      const actuals = state.actualLogs
+        .filter(a => a.date === dStr)
+        .sort((a, b) => timeToMinutes(a.startTime) - timeToMinutes(b.startTime));
+      const todos = state.todos.filter(t => t.dueDate === dStr);
+
+      const planMins = plans.reduce((acc, p) => acc + durationMinutes(p.startTime, p.endTime), 0);
       const actualMins = actuals.reduce((acc, a) => acc + durationMinutes(a.startTime, a.endTime), 0);
 
+      totalPlanMins += planMins;
+      totalActualMins += actualMins;
+      totalTodos += todos.length;
+
       const col = document.createElement('div');
-      col.className = 'week-day-col';
-      col.innerHTML = `
-        <div class="week-day-head">
-          <span>${cur.getMonth() + 1}/${cur.getDate()} ${dayNames[i]}</span>
-          <span style="font-size:0.74rem;color:#0D9488;">기록 ${formatDurationKo(actualMins)}</span>
+      col.className = [
+        'week-day-col',
+        dStr === todayStr ? 'is-today' : '',
+        dStr === selectedDate ? 'is-selected' : ''
+      ]
+        .filter(Boolean)
+        .join(' ');
+
+      // 상단 요일 헤더
+      const head = document.createElement('div');
+      head.className = 'week-day-head';
+      head.innerHTML = `
+        <div class="wk-head-left">
+          <span class="wk-day-title ${dayObj.dayIdx === 0 ? 'sun-text' : dayObj.dayIdx === 6 ? 'sat-text' : ''}">${dayObj.monthDayLabel} ${dayObj.dayName}</span>
+          ${dStr === todayStr ? '<span class="wk-today-pill">오늘</span>' : ''}
         </div>
-        <div style="display:flex;flex-direction:column;gap:6px;">
-          ${
-            plans.length === 0
-              ? '<p class="empty-guide">일정 없음</p>'
-              : plans
-                  .map(p => {
-                    const cat = getCategoryById(p.categoryId);
-                    return `
-                      <div class="mc-event-pill" style="background:${cat.color}18;color:${cat.color};padding:6px 8px;">
-                        <strong>${p.startTime}</strong> ${escapeHtml(p.title)}
-                      </div>`;
-                  })
-                  .join('')
-          }
-        </div>
+        <button type="button" class="mc-quick-add-btn" title="이 날짜에 항목 추가">+</button>
       `;
+      head.querySelector('.mc-quick-add-btn').addEventListener('click', e => {
+        e.stopPropagation();
+        selectedDate = dStr;
+        openItemModalForCreate(mode === 'actual' ? 'actual' : 'schedule', '09:00', '10:00');
+      });
+      col.appendChild(head);
+
+      // 일일 시간 요약 배지 영역
+      const statBox = document.createElement('div');
+      statBox.className = 'wk-day-stats';
+      if (mode === 'both') {
+        statBox.innerHTML = `
+          <span class="wk-stat-chip plan">계획 ${formatDurationKo(planMins)}</span>
+          <span class="wk-stat-chip actual">진행 ${formatDurationKo(actualMins)}</span>
+        `;
+      } else if (mode === 'plan') {
+        statBox.innerHTML = `<span class="wk-stat-chip plan">계획 ${formatDurationKo(planMins)} · ${plans.length}건</span>`;
+      } else {
+        statBox.innerHTML = `<span class="wk-stat-chip actual">진행 ${formatDurationKo(actualMins)} · ${actuals.length}건</span>`;
+      }
+      col.appendChild(statBox);
+
+      const listWrap = document.createElement('div');
+      listWrap.className = 'wk-items-list';
+
+      // 마감 할 일 표시 (계획+진행 또는 계획만 모드일 때)
+      if (showPlan && todos.length > 0) {
+        todos.forEach(todo => {
+          const cat = getCategoryById(todo.categoryId);
+          const tCard = document.createElement('div');
+          tCard.className = `wk-item-card wk-todo-card ${todo.completed ? 'is-done' : ''}`;
+          tCard.style.borderLeftColor = cat.color;
+          tCard.innerHTML = `
+            <div class="wk-card-top">
+              <label class="wk-check-wrap">
+                <input type="checkbox" ${todo.completed ? 'checked' : ''} />
+                <span class="wk-type-tag deadline">마감</span>
+              </label>
+              <span class="wk-cat-label" style="color:${cat.color}">${escapeHtml(cat.name)}</span>
+            </div>
+            <div class="wk-card-title">${todo.important ? '★ ' : ''}${escapeHtml(todo.title)}</div>
+          `;
+          tCard.querySelector('input').addEventListener('click', e => {
+            e.stopPropagation();
+            todo.completed = e.target.checked;
+            saveState();
+            renderAll();
+          });
+          tCard.addEventListener('click', e => {
+            e.stopPropagation();
+            if (e.target.tagName === 'INPUT') return;
+            openItemModalForEdit('todo', todo);
+          });
+          listWrap.appendChild(tCard);
+        });
+      }
+
+      // 시간순 통합 카드 목록 (계획 / 진행)
+      const combinedEntries = [];
+      if (showPlan) {
+        plans.forEach(p => combinedEntries.push({ kind: 'plan', time: p.startTime, item: p }));
+      }
+      if (showActual) {
+        actuals.forEach(a => combinedEntries.push({ kind: 'actual', time: a.startTime, item: a }));
+      }
+      combinedEntries.sort((a, b) => {
+        const diff = timeToMinutes(a.time) - timeToMinutes(b.time);
+        if (diff !== 0) return diff;
+        return a.kind === 'plan' ? -1 : 1;
+      });
+
+      if (combinedEntries.length === 0 && (!showPlan || todos.length === 0)) {
+        const empty = document.createElement('p');
+        empty.className = 'empty-guide wk-empty';
+        empty.textContent = mode === 'actual' ? '진행 기록 없음' : '등록된 일정 없음';
+        listWrap.appendChild(empty);
+      } else {
+        combinedEntries.forEach(entry => {
+          const item = entry.item;
+          const cat = getCategoryById(item.categoryId);
+          const card = document.createElement('div');
+
+          if (entry.kind === 'plan') {
+            card.className = `wk-item-card wk-plan-card ${item.completed ? 'is-done' : ''}`;
+            card.style.borderLeftColor = cat.color;
+            card.innerHTML = `
+              <div class="wk-card-top">
+                <span class="wk-type-tag plan">계획</span>
+                <span class="wk-time-range">${item.startTime}~${item.endTime}</span>
+                <button type="button" class="wk-mini-check-btn" title="완료 체크 및 실제 진행 시간 자동 반영">${item.completed ? '✓ 완료' : '완료'}</button>
+              </div>
+              <div class="wk-card-title">${item.important ? '<span class="important-star">★</span> ' : ''}${escapeHtml(item.title)}</div>
+            `;
+            card.querySelector('.wk-mini-check-btn').addEventListener('click', e => {
+              e.stopPropagation();
+              item.completed = !item.completed;
+              if (item.completed) {
+                const exists = state.actualLogs.some(
+                  a => a.date === item.date && a.title === item.title && a.startTime === item.startTime
+                );
+                if (!exists) {
+                  state.actualLogs.push({
+                    id: uid('act'),
+                    title: item.title,
+                    date: item.date,
+                    startTime: item.startTime,
+                    endTime: item.endTime,
+                    categoryId: item.categoryId
+                  });
+                }
+              }
+              saveState();
+              renderAll();
+            });
+            card.addEventListener('click', e => {
+              e.stopPropagation();
+              if (e.target.closest('button')) return;
+              openItemModalForEdit('schedule', item);
+            });
+          } else {
+            const dur = durationMinutes(item.startTime, item.endTime);
+            card.className = 'wk-item-card wk-actual-card';
+            card.style.borderLeftColor = cat.color;
+            card.style.background = `${cat.color}14`;
+            card.innerHTML = `
+              <div class="wk-card-top">
+                <span class="wk-type-tag actual">진행</span>
+                <span class="wk-time-range">${item.startTime}~${item.endTime}</span>
+                <span class="wk-dur-label" style="color:${cat.color}">${dur}분</span>
+              </div>
+              <div class="wk-card-title">${escapeHtml(item.title)}</div>
+            `;
+            card.addEventListener('click', e => {
+              e.stopPropagation();
+              openItemModalForEdit('actual', item);
+            });
+          }
+
+          listWrap.appendChild(card);
+        });
+      }
+
+      col.appendChild(listWrap);
+
       col.addEventListener('click', () => {
         selectedDate = dStr;
-        switchTab('dashboard');
+        if (isCompact) {
+          dashScope = 'day';
+        }
         renderAll();
       });
+
       grid.appendChild(col);
-    }
+    });
+
+    return { totalPlanMins, totalActualMins, totalTodos };
   }
 
+  // 주별 시간대별 표 (06:00~23:00 × 7일 그리드) 렌더러
+  function renderWeeklyTimetableInto(container, weekInfo, mode = 'both') {
+    if (!container) return { totalPlanMins: 0, totalActualMins: 0, totalTodos: 0 };
+    container.innerHTML = '';
+
+    const todayStr = getTodayStr();
+    const showPlan = mode === 'both' || mode === 'plan';
+    const showActual = mode === 'both' || mode === 'actual';
+
+    let totalPlanMins = 0;
+    let totalActualMins = 0;
+    let totalTodos = 0;
+
+    const table = document.createElement('div');
+    table.className = 'wk-timetable-grid';
+
+    // 1. 헤더 행
+    const headRow = document.createElement('div');
+    headRow.className = 'wk-tt-row wk-tt-header-row';
+    headRow.innerHTML = `<div class="wk-tt-time-cell">시간</div>`;
+
+    weekInfo.days.forEach(dayObj => {
+      const dStr = dayObj.dateStr;
+      const dayPlans = state.schedules.filter(s => s.date === dStr);
+      const dayActuals = state.actualLogs.filter(a => a.date === dStr);
+      const dayTodos = state.todos.filter(t => t.dueDate === dStr);
+
+      const pMins = dayPlans.reduce((s, x) => s + durationMinutes(x.startTime, x.endTime), 0);
+      const aMins = dayActuals.reduce((s, x) => s + durationMinutes(x.startTime, x.endTime), 0);
+      totalPlanMins += pMins;
+      totalActualMins += aMins;
+      totalTodos += dayTodos.length;
+
+      const hCell = document.createElement('div');
+      hCell.className = `wk-tt-day-head ${dStr === todayStr ? 'is-today' : ''}`;
+      let subStat = '';
+      if (mode === 'both') subStat = `계획 ${formatDurationKo(pMins)} · 진행 ${formatDurationKo(aMins)}`;
+      else if (mode === 'plan') subStat = `계획 ${formatDurationKo(pMins)}`;
+      else subStat = `진행 ${formatDurationKo(aMins)}`;
+
+      hCell.innerHTML = `
+        <div class="wk-tt-day-label">${dayObj.monthDayLabel} ${dayObj.dayName}</div>
+        <div class="wk-tt-day-sub">${subStat}</div>
+      `;
+      headRow.appendChild(hCell);
+    });
+    table.appendChild(headRow);
+
+    // 2. 06:00 ~ 23:00 시간 행
+    for (let hour = 6; hour <= 23; hour++) {
+      const hourStr = `${String(hour).padStart(2, '0')}:00`;
+      const nextHourStr = `${String(hour + 1).padStart(2, '0')}:00`;
+      const row = document.createElement('div');
+      row.className = 'wk-tt-row';
+
+      const timeCell = document.createElement('div');
+      timeCell.className = 'wk-tt-time-cell';
+      timeCell.textContent = hourStr;
+      row.appendChild(timeCell);
+
+      weekInfo.days.forEach(dayObj => {
+        const dStr = dayObj.dateStr;
+        const slot = document.createElement('div');
+        slot.className = `wk-tt-slot ${dStr === todayStr ? 'is-today-col' : ''}`;
+
+        if (showPlan) {
+          const plansInHour = state.schedules.filter(
+            s => s.date === dStr && Math.floor(timeToMinutes(s.startTime) / 60) === hour
+          );
+          plansInHour.forEach(p => {
+            const cat = getCategoryById(p.categoryId);
+            const chip = document.createElement('div');
+            chip.className = `wk-tt-chip plan ${p.completed ? 'is-done' : ''}`;
+            chip.style.borderLeftColor = cat.color;
+            chip.innerHTML = `
+              <span class="wk-tt-chip-tag plan">계획</span>
+              <span class="wk-tt-chip-title">${p.important ? '★ ' : ''}${escapeHtml(p.title)}</span>
+            `;
+            chip.addEventListener('click', e => {
+              e.stopPropagation();
+              openItemModalForEdit('schedule', p);
+            });
+            slot.appendChild(chip);
+          });
+        }
+
+        if (showActual) {
+          const actualsInHour = state.actualLogs.filter(
+            a => a.date === dStr && Math.floor(timeToMinutes(a.startTime) / 60) === hour
+          );
+          actualsInHour.forEach(a => {
+            const cat = getCategoryById(a.categoryId);
+            const dur = durationMinutes(a.startTime, a.endTime);
+            const chip = document.createElement('div');
+            chip.className = 'wk-tt-chip actual';
+            chip.style.borderLeftColor = cat.color;
+            chip.style.background = `${cat.color}18`;
+            chip.innerHTML = `
+              <span class="wk-tt-chip-tag actual">진행 ${dur}분</span>
+              <span class="wk-tt-chip-title">${escapeHtml(a.title)}</span>
+            `;
+            chip.addEventListener('click', e => {
+              e.stopPropagation();
+              openItemModalForEdit('actual', a);
+            });
+            slot.appendChild(chip);
+          });
+        }
+
+        slot.addEventListener('click', () => {
+          selectedDate = dStr;
+          openItemModalForCreate(mode === 'actual' ? 'actual' : 'schedule', hourStr, nextHourStr);
+        });
+
+        row.appendChild(slot);
+      });
+
+      table.appendChild(row);
+    }
+
+    container.appendChild(table);
+    return { totalPlanMins, totalActualMins, totalTodos };
+  }
+
+  // 우측 주요 일정 및 할 일 마감 리스트 렌더링
   function renderUpcomingMilestones() {
     const container = document.getElementById('upcomingMilestoneList');
     if (!container) return;
 
-    const combined = [
-      ...state.schedules.map(s => ({
+    const scheduleItems = state.schedules
+      .filter(s => (currentMilestoneFilter === 'important' ? s.important : currentMilestoneFilter === 'all'))
+      .map(s => ({
+        kind: 'schedule',
+        ref: s,
         date: s.date,
-        time: s.startTime,
+        time: `${s.startTime}~${s.endTime}`,
         title: s.title,
         categoryId: s.categoryId,
-        important: s.important,
-        badge: '일정'
-      })),
-      ...state.todos
-        .filter(t => t.dueDate && !t.completed)
-        .map(t => ({
-          date: t.dueDate,
-          time: '마감',
-          title: t.title,
-          categoryId: t.categoryId,
-          important: t.important,
-          badge: '할 일'
-        }))
-    ].sort((a, b) => a.date.localeCompare(b.date));
+        important: Boolean(s.important),
+        completed: Boolean(s.completed)
+      }));
+
+    // 전체 필터에서도 주요 일정이 상단에 돋보이도록 정렬하되, 주요 일정이 아닌 일반 일정도 날짜순 확인 가능
+    const todoItems =
+      currentMilestoneFilter === 'important'
+        ? []
+        : state.todos
+            .filter(t => Boolean(t.dueDate))
+            .map(t => ({
+              kind: 'todo',
+              ref: t,
+              date: t.dueDate,
+              time: '할 일 마감',
+              title: t.title,
+              categoryId: t.categoryId,
+              important: Boolean(t.important),
+              completed: Boolean(t.completed)
+            }));
+
+    let combined = [];
+    if (currentMilestoneFilter === 'deadline') {
+      combined = todoItems;
+    } else if (currentMilestoneFilter === 'important') {
+      combined = scheduleItems;
+    } else {
+      // 기본 전체 보기: 중요 일정 + 할 일 마감을 최우선 표시
+      const keySchedules = scheduleItems.filter(s => s.important);
+      const otherSchedules = scheduleItems.filter(s => !s.important);
+      combined = [...todoItems, ...keySchedules, ...otherSchedules];
+    }
+
+    combined.sort((a, b) => {
+      if (a.completed !== b.completed) return a.completed ? 1 : -1;
+      const cmp = a.date.localeCompare(b.date);
+      if (cmp !== 0) return cmp;
+      return Number(b.important) - Number(a.important);
+    });
 
     if (combined.length === 0) {
-      container.innerHTML = `<p class="empty-guide">등록된 주요 일정이 없습니다.</p>`;
+      container.innerHTML = `<p class="empty-guide">표시할 주요 일정이나 마감 할 일이 없습니다.</p>`;
       return;
     }
 
     container.innerHTML = '';
-    combined.slice(0, 15).forEach(item => {
+    combined.slice(0, 20).forEach(item => {
       const cat = getCategoryById(item.categoryId);
+      const dday = getDdayBadgeInfo(item.date, item.completed);
       const el = document.createElement('div');
-      el.className = 'milestone-item';
+      el.className = `milestone-item ${item.completed ? 'is-done' : ''}`;
       el.innerHTML = `
-        <div style="display:flex;justify-content:space-between;font-size:0.75rem;margin-bottom:3px;">
-          <span style="font-weight:700;color:${cat.color}">${item.date} · ${item.time}</span>
+        <div class="ms-item-top">
+          <div class="ms-badges-left">
+            <span class="ms-type-badge ${item.kind === 'todo' ? 'deadline' : item.important ? 'important' : 'normal'}">
+              ${item.kind === 'todo' ? '할 일 마감' : item.important ? '★ 주요 일정' : '일정'}
+            </span>
+            <span class="ms-dday-badge ${dday.cls}">${dday.text}</span>
+          </div>
           <span class="cat-dot-tag" style="background:${cat.color}20;color:${cat.color}">${escapeHtml(cat.name)}</span>
         </div>
-        <div style="font-weight:700;font-size:0.88rem;">
-          ${item.important ? '<span class="important-star">★</span> ' : ''}${escapeHtml(item.title)}
+        <div class="ms-item-body">
+          <input type="checkbox" class="ms-check" ${item.completed ? 'checked' : ''} title="완료 상태 전환" />
+          <div class="ms-title-wrap">
+            <div class="ms-title-text">${escapeHtml(item.title)}</div>
+            <div class="ms-date-text">${item.date} · ${item.time}</div>
+          </div>
         </div>
       `;
-      el.addEventListener('click', () => {
-        selectedDate = item.date;
-        switchTab('dashboard');
+
+      el.querySelector('.ms-check').addEventListener('click', e => {
+        e.stopPropagation();
+        item.ref.completed = e.target.checked;
+        saveState();
         renderAll();
       });
+
+      el.addEventListener('click', e => {
+        if (e.target.classList.contains('ms-check')) return;
+        selectedDate = item.date;
+        openItemModalForEdit(item.kind === 'todo' ? 'todo' : 'schedule', item.ref);
+      });
+
       container.appendChild(el);
     });
   }
@@ -2648,18 +3402,65 @@
 
     document.getElementById('aiSmartParseBtn').addEventListener('click', handleAiSmartParse);
 
-    // 날짜 이동 버튼
+    // 날짜 이동 버튼 (일별 / 주별 / 월별 범위에 맞춰 이동)
     document.getElementById('prevDayBtn').addEventListener('click', () => {
-      selectedDate = addDaysStr(selectedDate, -1);
+      if (dashScope === 'week') {
+        selectedDate = addDaysStr(selectedDate, -7);
+      } else if (dashScope === 'month') {
+        selectedDate = addMonthsStr(selectedDate, -1);
+      } else {
+        selectedDate = addDaysStr(selectedDate, -1);
+      }
       renderAll();
     });
     document.getElementById('nextDayBtn').addEventListener('click', () => {
-      selectedDate = addDaysStr(selectedDate, 1);
+      if (dashScope === 'week') {
+        selectedDate = addDaysStr(selectedDate, 7);
+      } else if (dashScope === 'month') {
+        selectedDate = addMonthsStr(selectedDate, 1);
+      } else {
+        selectedDate = addDaysStr(selectedDate, 1);
+      }
       renderAll();
     });
     document.getElementById('goTodayBtn').addEventListener('click', () => {
       selectedDate = getTodayStr();
       miniCalCursor = new Date();
+      fullCalCursor = new Date();
+      renderAll();
+    });
+
+    // 대시보드 일별 · 주별 · 월별 전환 탭
+    document.querySelectorAll('#dashScopeTabs [data-dashscope]').forEach(btn => {
+      btn.addEventListener('click', () => {
+        dashScope = btn.dataset.dashscope;
+        renderDualTimeline();
+      });
+    });
+
+    // 대시보드 계획+진행 / 계획만 / 진행만 전환 탭
+    document.querySelectorAll('#dashTrackModeTabs [data-dashtrack]').forEach(btn => {
+      btn.addEventListener('click', () => {
+        dashTrackMode = btn.dataset.dashtrack;
+        calWeekMode = dashTrackMode;
+        renderDualTimeline();
+      });
+    });
+
+    // 대시보드 월별 필터 전환 탭
+    document.querySelectorAll('#dashMonthModeTabs [data-dashmonth]').forEach(btn => {
+      btn.addEventListener('click', () => {
+        dashMonthMode = btn.dataset.dashmonth;
+        calMonthMode = dashMonthMode;
+        renderDualTimeline();
+      });
+    });
+
+    document.getElementById('dashOpenFullCalBtn')?.addEventListener('click', () => {
+      const [sy, sm] = selectedDate.split('-').map(Number);
+      fullCalCursor = new Date(sy, sm - 1, 1);
+      currentCalView = 'month';
+      switchTab('calendar');
       renderAll();
     });
     document.getElementById('miniCalPrevBtn').addEventListener('click', () => {
@@ -2864,12 +3665,40 @@
       showToast('루틴이 삭제되었습니다.');
     });
 
-    // 탭 3: 주간·월간 달력 네비게이션
-    document.querySelectorAll('[data-calview]').forEach(btn => {
+    // 탭 3: 주간·월간 달력 네비게이션 및 보기 옵션
+    document.querySelectorAll('#calPrimaryViewTabs [data-calview]').forEach(btn => {
       btn.addEventListener('click', () => {
-        document.querySelectorAll('[data-calview]').forEach(b => b.classList.remove('active'));
-        btn.classList.add('active');
         currentCalView = btn.dataset.calview;
+        renderCalendarOverviewTab();
+      });
+    });
+
+    document.querySelectorAll('#calMonthFilterTabs [data-monthmode]').forEach(btn => {
+      btn.addEventListener('click', () => {
+        calMonthMode = btn.dataset.monthmode;
+        dashMonthMode = calMonthMode;
+        renderCalendarOverviewTab();
+      });
+    });
+
+    document.querySelectorAll('#calWeekTrackTabs [data-weekmode]').forEach(btn => {
+      btn.addEventListener('click', () => {
+        calWeekMode = btn.dataset.weekmode;
+        dashTrackMode = calWeekMode;
+        renderCalendarOverviewTab();
+      });
+    });
+
+    document.querySelectorAll('#calWeekLayoutTabs [data-weeklayout]').forEach(btn => {
+      btn.addEventListener('click', () => {
+        calWeekLayout = btn.dataset.weeklayout;
+        renderCalendarOverviewTab();
+      });
+    });
+
+    document.querySelectorAll('#milestoneFilterTabs [data-msfilter]').forEach(btn => {
+      btn.addEventListener('click', () => {
+        currentMilestoneFilter = btn.dataset.msfilter;
         renderCalendarOverviewTab();
       });
     });
@@ -2890,6 +3719,16 @@
       }
       renderCalendarOverviewTab();
     });
+    document.getElementById('calTodayBtn')?.addEventListener('click', () => {
+      selectedDate = getTodayStr();
+      fullCalCursor = new Date();
+      miniCalCursor = new Date();
+      renderAll();
+    });
+
+    document.getElementById('calAddScheduleBtn')?.addEventListener('click', () => openItemModalForCreate('schedule'));
+    document.getElementById('calAddTodoBtn')?.addEventListener('click', () => openItemModalForCreate('todo'));
+    document.getElementById('calAddActualBtn')?.addEventListener('click', () => openItemModalForCreate('actual'));
 
     // 탭 4: 타임트래커 보고서 및 다음 달 목표 이벤트
     document.querySelectorAll('#reportPeriodTabs .filter-pill').forEach(btn => {

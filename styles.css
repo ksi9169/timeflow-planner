@@ -1281,12 +1281,135 @@ button:disabled {
   gap: 12px;
 }
 
-/* ==================== 탭 3: 주간 · 월간 전체 조망 ==================== */
+/* ==================== 탭 3: 주간 · 월간 전체 조망 및 일별·주별·월별 통합 뷰 ==================== */
+.scope-seg-group {
+  display: inline-flex;
+  background: var(--bg-subtle);
+  border: 1px solid var(--border-color);
+  padding: 3px;
+  border-radius: 9px;
+  gap: 2px;
+}
+
+.scope-seg-btn {
+  border: none;
+  background: transparent;
+  color: var(--text-sub);
+  font-size: 0.78rem;
+  font-weight: 700;
+  padding: 5px 11px;
+  border-radius: 7px;
+  cursor: pointer;
+  transition: all 0.15s;
+}
+
+.scope-seg-btn:hover {
+  color: var(--text-main);
+}
+
+.scope-seg-btn.active {
+  background: var(--primary);
+  color: #FFFFFF;
+  box-shadow: 0 1px 3px rgba(79, 70, 229, 0.25);
+}
+
+.view-mode-bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  flex-wrap: wrap;
+  padding: 8px 12px;
+  background: #F8FAFC;
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius-sm);
+  margin-bottom: 10px;
+}
+
+.view-mode-left {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.mode-bar-label {
+  font-size: 0.76rem;
+  font-weight: 800;
+  color: var(--text-sub);
+}
+
+.mode-bar-divider {
+  width: 1px;
+  height: 16px;
+  background: var(--border-strong);
+  margin: 0 4px;
+}
+
+.mode-pill-group {
+  display: inline-flex;
+  gap: 5px;
+  flex-wrap: wrap;
+}
+
+.mode-pill-btn {
+  border: 1px solid var(--border-color);
+  background: #FFFFFF;
+  color: var(--text-sub);
+  font-size: 0.76rem;
+  font-weight: 700;
+  padding: 4px 10px;
+  border-radius: 999px;
+  cursor: pointer;
+  transition: all 0.15s;
+}
+
+.mode-pill-btn:hover {
+  border-color: var(--primary);
+  color: var(--primary);
+}
+
+.mode-pill-btn.active {
+  background: #1E293B;
+  color: #FFFFFF;
+  border-color: #1E293B;
+}
+
+.view-mode-summary {
+  font-size: 0.76rem;
+  font-weight: 700;
+  color: var(--teal);
+  background: var(--teal-soft);
+  padding: 3px 10px;
+  border-radius: 999px;
+}
+
+.dual-timeline-header.single-col,
+.dt-hour-row.single-col {
+  grid-template-columns: 62px 1fr;
+}
+
+.timeline-block.is-completed-block .tb-title {
+  text-decoration: line-through;
+  opacity: 0.68;
+}
+
 .calendar-overview-layout {
   display: grid;
-  grid-template-columns: 1fr 340px;
+  grid-template-columns: 1fr 350px;
   gap: 16px;
   align-items: start;
+}
+
+.calendar-top-head {
+  flex-wrap: wrap;
+}
+
+.cal-head-right {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
 }
 
 .month-cal-weekdays {
@@ -1299,6 +1422,14 @@ button:disabled {
   padding: 8px 0;
   border-bottom: 1px solid var(--border-color);
 }
+.month-cal-weekdays span:first-child,
+.sun-text {
+  color: #E11D48;
+}
+.month-cal-weekdays span:last-child,
+.sat-text {
+  color: #2563EB;
+}
 
 .month-cal-grid {
   display: grid;
@@ -1308,15 +1439,20 @@ button:disabled {
 }
 
 .month-cell {
-  min-height: 112px;
+  min-height: 122px;
   border-right: 1px solid var(--border-color);
   border-bottom: 1px solid var(--border-color);
-  padding: 6px;
+  padding: 7px;
   cursor: pointer;
   background: var(--bg-card);
   display: flex;
   flex-direction: column;
-  gap: 4px;
+  gap: 5px;
+  transition: background 0.12s, box-shadow 0.12s;
+}
+.month-cal-grid.compact .month-cell {
+  min-height: 98px;
+  padding: 5px;
 }
 .month-cell:hover {
   background: #F8FAFC;
@@ -1324,61 +1460,477 @@ button:disabled {
 .month-cell.other-month {
   background: #F1F5F9;
   color: var(--text-muted);
+  opacity: 0.72;
 }
 .month-cell.is-today {
   background: #EEF2FF;
+}
+.month-cell.is-selected {
+  box-shadow: inset 0 0 0 2px var(--primary);
+}
+.month-cell.sun-cell .mc-day-num {
+  color: #E11D48;
+}
+.month-cell.sat-cell .mc-day-num {
+  color: #2563EB;
 }
 
 .mc-date-head {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  font-size: 0.8rem;
-  font-weight: 700;
+  font-size: 0.79rem;
+  font-weight: 800;
+}
+
+.mc-head-right {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.mc-quick-add-btn {
+  width: 20px;
+  height: 20px;
+  border-radius: 5px;
+  border: 1px solid var(--border-color);
+  background: #FFFFFF;
+  color: var(--text-sub);
+  font-size: 0.82rem;
+  font-weight: 800;
+  line-height: 1;
+  cursor: pointer;
+  opacity: 0;
+  transition: opacity 0.12s, background 0.12s;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+.month-cell:hover .mc-quick-add-btn,
+.week-day-col:hover .mc-quick-add-btn {
+  opacity: 1;
+}
+.mc-quick-add-btn:hover {
+  background: var(--primary);
+  color: #FFFFFF;
+  border-color: var(--primary);
 }
 
 .mc-actual-badge {
-  font-size: 0.68rem;
+  font-size: 0.67rem;
   color: var(--teal);
   background: var(--teal-soft);
   padding: 1px 5px;
   border-radius: 4px;
+  font-weight: 700;
 }
 
-.mc-event-pill {
+.mc-deadline-badge {
+  font-size: 0.67rem;
+  color: #BE123C;
+  background: #FFE4E6;
+  padding: 1px 6px;
+  border-radius: 4px;
+  font-weight: 800;
+}
+
+.mc-imp-badge {
+  font-size: 0.67rem;
+  color: #B45309;
+  background: #FEF3C7;
+  padding: 1px 6px;
+  border-radius: 4px;
+  font-weight: 800;
+}
+
+.mc-items-stack {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.mc-item-pill {
+  display: flex;
+  align-items: center;
+  gap: 4px;
   font-size: 0.72rem;
-  padding: 2px 6px;
+  padding: 3px 6px;
   border-radius: 5px;
+  border-left: 3px solid var(--primary);
+  background: #F8FAFC;
+  overflow: hidden;
+  transition: transform 0.1s;
+}
+.mc-item-pill:hover {
+  transform: translateX(1px);
+}
+.mc-item-pill.is-done {
+  opacity: 0.55;
+}
+.mc-item-pill.is-done .mc-item-title {
+  text-decoration: line-through;
+}
+
+.mc-todo-pill {
+  background: #FFF1F2;
+  border: 1px solid #FECDD3;
+  border-left-width: 3px;
+}
+
+.mc-imp-pill {
+  border: 1px solid rgba(79, 70, 229, 0.22);
+  border-left-width: 3px;
+}
+
+.mc-inline-check {
+  width: 13px;
+  height: 13px;
+  accent-color: #E11D48;
+  cursor: pointer;
+  flex-shrink: 0;
+}
+
+.mc-tag-chip {
+  font-size: 0.64rem;
+  font-weight: 800;
+  padding: 1px 4px;
+  border-radius: 3px;
+  flex-shrink: 0;
+}
+.mc-tag-chip.deadline {
+  background: #E11D48;
+  color: #FFFFFF;
+}
+
+.mc-reg-time {
+  font-size: 0.67rem;
+  font-weight: 800;
+  flex-shrink: 0;
+}
+
+.mc-item-title {
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
   font-weight: 600;
+  color: var(--text-main);
 }
 
-.week-matrix-grid {
+.mc-regular-summary {
+  font-size: 0.68rem;
+  color: var(--text-sub);
+  background: var(--bg-subtle);
+  padding: 2px 6px;
+  border-radius: 4px;
+  font-weight: 600;
+}
+
+.mc-more-count {
+  font-size: 0.68rem;
+  color: var(--text-muted);
+  font-weight: 700;
+  padding-left: 2px;
+}
+
+/* ==================== 주별 보드 (7일 컬럼) & 시간대별 표 ==================== */
+.week-matrix-grid,
+.dash-week-grid {
   display: grid;
-  grid-template-columns: repeat(7, 1fr);
-  gap: 10px;
+  grid-template-columns: repeat(7, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.dash-week-grid {
+  max-height: 620px;
+  overflow-y: auto;
 }
 
 .week-day-col {
   border: 1px solid var(--border-color);
   border-radius: var(--radius-md);
-  padding: 10px;
+  padding: 9px;
   background: var(--bg-card);
   min-height: 360px;
+  display: flex;
+  flex-direction: column;
+  gap: 7px;
+  cursor: pointer;
+  transition: border-color 0.15s, box-shadow 0.15s;
+}
+.week-day-col:hover {
+  border-color: #CBD5E1;
+}
+.week-day-col.is-today {
+  background: linear-gradient(180deg, #EEF2FF 0%, #FFFFFF 120px);
+  border-color: #A5B4FC;
+}
+.week-day-col.is-selected {
+  box-shadow: inset 0 0 0 2px var(--primary);
 }
 
 .week-day-head {
   font-weight: 800;
-  font-size: 0.88rem;
-  padding-bottom: 8px;
-  margin-bottom: 8px;
+  font-size: 0.84rem;
+  padding-bottom: 6px;
   border-bottom: 1px solid var(--border-color);
   display: flex;
+  align-items: center;
   justify-content: space-between;
 }
 
+.wk-head-left {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+}
+
+.wk-today-pill {
+  font-size: 0.65rem;
+  font-weight: 800;
+  background: var(--primary);
+  color: #FFFFFF;
+  padding: 1px 6px;
+  border-radius: 999px;
+}
+
+.wk-day-stats {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+}
+
+.wk-stat-chip {
+  font-size: 0.68rem;
+  font-weight: 700;
+  padding: 2px 6px;
+  border-radius: 5px;
+}
+.wk-stat-chip.plan {
+  background: var(--primary-soft);
+  color: var(--primary);
+}
+.wk-stat-chip.actual {
+  background: var(--teal-soft);
+  color: var(--teal);
+}
+
+.wk-items-list {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.wk-item-card {
+  border: 1px solid var(--border-color);
+  border-left: 3.5px solid var(--primary);
+  border-radius: 7px;
+  padding: 6px 7px;
+  background: #FFFFFF;
+  font-size: 0.76rem;
+  transition: transform 0.12s, box-shadow 0.12s;
+}
+.wk-item-card:hover {
+  transform: translateY(-1px);
+  box-shadow: var(--shadow-sm);
+}
+.wk-item-card.is-done {
+  opacity: 0.58;
+}
+.wk-item-card.is-done .wk-card-title {
+  text-decoration: line-through;
+}
+
+.wk-todo-card {
+  background: #FFF1F2;
+  border-color: #FECDD3;
+}
+
+.wk-card-top {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 4px;
+  margin-bottom: 3px;
+}
+
+.wk-check-wrap {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  cursor: pointer;
+}
+
+.wk-type-tag {
+  font-size: 0.64rem;
+  font-weight: 800;
+  padding: 1px 5px;
+  border-radius: 4px;
+}
+.wk-type-tag.plan {
+  background: var(--primary-soft);
+  color: var(--primary);
+}
+.wk-type-tag.actual {
+  background: var(--teal);
+  color: #FFFFFF;
+}
+.wk-type-tag.deadline {
+  background: #E11D48;
+  color: #FFFFFF;
+}
+
+.wk-time-range {
+  font-size: 0.68rem;
+  font-weight: 700;
+  color: var(--text-sub);
+  font-variant-numeric: tabular-nums;
+}
+
+.wk-dur-label,
+.wk-cat-label {
+  font-size: 0.68rem;
+  font-weight: 800;
+}
+
+.wk-mini-check-btn {
+  border: 1px solid var(--border-color);
+  background: #F8FAFC;
+  color: var(--text-sub);
+  font-size: 0.65rem;
+  font-weight: 700;
+  padding: 1px 5px;
+  border-radius: 4px;
+  cursor: pointer;
+}
+.wk-mini-check-btn:hover {
+  border-color: var(--primary);
+  color: var(--primary);
+}
+
+.wk-card-title {
+  font-weight: 700;
+  color: var(--text-main);
+  line-height: 1.3;
+  word-break: keep-all;
+}
+
+/* 주별 시간대별 표 (06:00~23:00 × 7일) */
+.week-timetable-wrap {
+  max-height: 660px;
+  overflow: auto;
+  border: 1px solid var(--border-color);
+  border-radius: 10px;
+}
+
+.wk-timetable-grid {
+  min-width: 780px;
+}
+
+.wk-tt-row {
+  display: grid;
+  grid-template-columns: 60px repeat(7, minmax(0, 1fr));
+  border-bottom: 1px solid var(--border-color);
+  min-height: 48px;
+}
+.wk-tt-row:last-child {
+  border-bottom: none;
+}
+
+.wk-tt-header-row {
+  position: sticky;
+  top: 0;
+  z-index: 5;
+  background: #1E293B;
+  color: #FFFFFF;
+  min-height: 44px;
+}
+
+.wk-tt-time-cell {
+  font-size: 0.74rem;
+  font-weight: 700;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-right: 1px solid var(--border-color);
+  color: var(--text-sub);
+  background: #F8FAFC;
+  font-variant-numeric: tabular-nums;
+}
+.wk-tt-header-row .wk-tt-time-cell {
+  background: #1E293B;
+  color: #CBD5E1;
+  border-right-color: rgba(255, 255, 255, 0.14);
+}
+
+.wk-tt-day-head {
+  padding: 6px 8px;
+  text-align: center;
+  border-right: 1px solid rgba(255, 255, 255, 0.14);
+}
+.wk-tt-day-head.is-today {
+  background: #312E81;
+}
+
+.wk-tt-day-label {
+  font-size: 0.8rem;
+  font-weight: 800;
+}
+
+.wk-tt-day-sub {
+  font-size: 0.67rem;
+  color: #93C5FD;
+  margin-top: 2px;
+}
+
+.wk-tt-slot {
+  padding: 4px;
+  border-right: 1px solid var(--border-color);
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  cursor: pointer;
+}
+.wk-tt-slot:hover {
+  background: rgba(79, 70, 229, 0.04);
+}
+.wk-tt-slot.is-today-col {
+  background: rgba(238, 242, 255, 0.45);
+}
+
+.wk-tt-chip {
+  font-size: 0.7rem;
+  padding: 3px 5px;
+  border-radius: 5px;
+  border-left: 3px solid var(--primary);
+  background: #F8FAFC;
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+}
+.wk-tt-chip.is-done {
+  opacity: 0.55;
+  text-decoration: line-through;
+}
+
+.wk-tt-chip-tag {
+  font-size: 0.62rem;
+  font-weight: 800;
+}
+.wk-tt-chip-tag.plan {
+  color: var(--primary);
+}
+.wk-tt-chip-tag.actual {
+  color: var(--teal);
+}
+
+.wk-tt-chip-title {
+  font-weight: 700;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* 우측 주요 일정 및 마감 목록 카드 */
 .milestone-list {
   display: flex;
   flex-direction: column;
@@ -1391,10 +1943,112 @@ button:disabled {
   padding: 10px 12px;
   border-radius: var(--radius-sm);
   border: 1px solid var(--border-color);
+  background: var(--bg-card);
   cursor: pointer;
+  transition: border-color 0.15s, transform 0.12s;
 }
 .milestone-item:hover {
   border-color: var(--primary);
+  transform: translateY(-1px);
+}
+.milestone-item.is-done {
+  opacity: 0.58;
+  background: var(--bg-subtle);
+}
+.milestone-item.is-done .ms-title-text {
+  text-decoration: line-through;
+}
+
+.ms-item-top {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 6px;
+  margin-bottom: 6px;
+}
+
+.ms-badges-left {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+}
+
+.ms-type-badge {
+  font-size: 0.68rem;
+  font-weight: 800;
+  padding: 2px 7px;
+  border-radius: 5px;
+}
+.ms-type-badge.deadline {
+  background: #FFE4E6;
+  color: #BE123C;
+}
+.ms-type-badge.important {
+  background: #FEF3C7;
+  color: #B45309;
+}
+.ms-type-badge.normal {
+  background: var(--bg-subtle);
+  color: var(--text-sub);
+}
+
+.ms-dday-badge {
+  font-size: 0.68rem;
+  font-weight: 800;
+  padding: 2px 7px;
+  border-radius: 999px;
+}
+.ms-dday-badge.dday-today {
+  background: #E11D48;
+  color: #FFFFFF;
+}
+.ms-dday-badge.dday-soon {
+  background: #F59E0B;
+  color: #FFFFFF;
+}
+.ms-dday-badge.dday-future {
+  background: var(--primary-soft);
+  color: var(--primary);
+}
+.ms-dday-badge.dday-overdue {
+  background: #FEE2E2;
+  color: #991B1B;
+}
+.ms-dday-badge.dday-done,
+.ms-dday-badge.dday-muted {
+  background: var(--bg-subtle);
+  color: var(--text-muted);
+}
+
+.ms-item-body {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+}
+
+.ms-check {
+  width: 16px;
+  height: 16px;
+  margin-top: 2px;
+  accent-color: var(--primary);
+  cursor: pointer;
+}
+
+.ms-title-wrap {
+  min-width: 0;
+  flex: 1;
+}
+
+.ms-title-text {
+  font-size: 0.87rem;
+  font-weight: 700;
+  color: var(--text-main);
+}
+
+.ms-date-text {
+  font-size: 0.74rem;
+  color: var(--text-sub);
+  margin-top: 2px;
 }
 
 /* ==================== 탭 4: 타임트래커 분석 보고서 & 다음 달 목표 설계 ==================== */
@@ -1941,7 +2595,8 @@ button:disabled {
   .donut-and-legend {
     grid-template-columns: 1fr;
   }
-  .week-matrix-grid {
+  .week-matrix-grid,
+  .dash-week-grid {
     grid-template-columns: 1fr;
   }
 }
