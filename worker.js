@@ -11,6 +11,8 @@ const MODEL_PRIORITY = [
 
 // 무료 API 키 한도 소진(429 등) 시 90초간 쿨다운 후 다시 무료 키 1순위로 자동 복귀
 const keyCooldownUntil = new Map();
+// 미지원/종료 모델(404) 응답 시 1시간 동안 건너뛰어 불필요한 왕복 지연 제거
+const unsupportedModelsUntil = new Map();
 
 function getOrderedApiKeys(env) {
   const now = Date.now();
@@ -83,9 +85,12 @@ function parseJsonSafe(rawText) {
 
 async function generateWithFallback(apiKeys, payload, timeoutMs = 12000) {
   let lastErr = 'No available model';
+  const now = Date.now();
+  const activeModels = MODEL_PRIORITY.filter(m => (unsupportedModelsUntil.get(m) || 0) <= now);
+  const modelsToTry = activeModels.length > 0 ? activeModels : MODEL_PRIORITY;
 
   for (const { key, tier } of apiKeys) {
-    for (const modelName of MODEL_PRIORITY) {
+    for (const modelName of modelsToTry) {
       const ctrl = new AbortController();
       const timer = setTimeout(() => ctrl.abort(), timeoutMs);
       try {
@@ -102,6 +107,10 @@ async function generateWithFallback(apiKeys, payload, timeoutMs = 12000) {
         }
         const errBody = await res.text().catch(() => '');
         lastErr = `${modelName}:${tier} (${res.status})`;
+        if (res.status === 404) {
+          unsupportedModelsUntil.set(modelName, Date.now() + 3600_000);
+          continue;
+        }
         if (shouldSwitchToNextKey(key, res.status, errBody)) {
           break;
         }
@@ -179,8 +188,8 @@ async function handleCloudSync(request, env) {
   const action = body.action || 'load';
   const rawSyncCode = String(body.syncCode || '').trim().toUpperCase();
 
-  if (!rawSyncCode || rawSyncCode.length < 3) {
-    return jsonResponse({ ok: false, error: '동기화 코드를 3자 이상 입력해 주세요.' }, 400);
+  if (!rawSyncCode || rawSyncCode.length < 3 || rawSyncCode.length > 64) {
+    return jsonResponse({ ok: false, error: '동기화 코드를 3~64자 사이로 입력해 주세요.' }, 400);
   }
 
   const dbCode = `TIMEFLOW:${rawSyncCode}`;
@@ -420,21 +429,23 @@ export default {
 
     if (env && env.ASSETS) {
       const res = await env.ASSETS.fetch(request);
+      const headers = new Headers(res.headers);
       if (
         url.pathname === '/' ||
         url.pathname.endsWith('.html') ||
         url.pathname.endsWith('.js') ||
-        url.pathname.endsWith('.css')
+        url.pathname.endsWith('.css') ||
+        url.pathname.endsWith('.json')
       ) {
-        const headers = new Headers(res.headers);
-        headers.set('Cache-Control', 'no-cache, no-store, must-revalidate');
-        return new Response(res.body, {
-          status: res.status,
-          statusText: res.statusText,
-          headers
-        });
+        headers.set('Cache-Control', 'public, max-age=0, must-revalidate');
+      } else if (url.pathname.endsWith('.png') || url.pathname.endsWith('.svg')) {
+        headers.set('Cache-Control', 'public, max-age=86400');
       }
-      return res;
+      return new Response(res.body, {
+        status: res.status,
+        statusText: res.statusText,
+        headers
+      });
     }
 
     return new Response('Not Found', { status: 404 });

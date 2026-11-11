@@ -6,8 +6,18 @@
   'use strict';
 
   const STORAGE_KEY = 'TIMEFLOW_APP_STATE_V1';
+  const FIRED_ALARM_STORAGE_KEY = 'TIMEFLOW_FIRED_ALARMS_V1';
   const SUPABASE_URL = 'https://buwyexbkjtnubjjzjgxa.supabase.co';
   const SUPABASE_KEY = 'sb_publishable_9UEw3qlP8N6mss-ECjYrSA_lVs33DzY';
+
+  function sanitizeHexColor(rawColor, fallback = '#4F46E5') {
+    const s = String(rawColor || '').trim();
+    if (/^#[0-9A-Fa-f]{6}$/.test(s)) return s.toUpperCase();
+    if (/^#[0-9A-Fa-f]{3}$/.test(s)) {
+      return `#${s[1]}${s[1]}${s[2]}${s[2]}${s[3]}${s[3]}`.toUpperCase();
+    }
+    return fallback;
+  }
 
   // -------------------- 날짜·시간 유틸리티 --------------------
   function toDateStr(dateObj) {
@@ -656,7 +666,6 @@
   }
 
   // -------------------- 전역 런타임 상태 --------------------
-  const FIRED_ALARM_STORAGE_KEY = 'TIMEFLOW_FIRED_ALARMS_V1';
   let state = loadState();
   let selectedDate = getTodayStr();
   let miniCalCursor = new Date();
@@ -681,11 +690,19 @@
   let selectedProjectTag = '';
   let todoGroupByTag = true;
   let currentSearchTypeFilter = 'all';
+  let currentActiveTab = 'dashboard';
+
+  function getActiveRealProjectTag() {
+    return selectedProjectTag && selectedProjectTag !== '__UNTAGGED__'
+      ? cleanProjectTag(selectedProjectTag)
+      : '';
+  }
 
   // 실행 취소 히스토리 스택 & 자동 동기화 타이머
   const undoStack = [];
   let autoSyncTimerId = null;
   let lastAutoCloudPullAt = 0;
+  let isSyncInFlight = false;
 
   // 실시간 타임트래커 스톱워치 상태
   let liveTracker = {
@@ -693,6 +710,7 @@
     title: '',
     categoryId: 'cat_work',
     projectTag: '',
+    startDateStr: '',
     startTimestamp: null,
     startTimeStr: '',
     elapsedSeconds: 0,
@@ -712,6 +730,7 @@
     stepBaseElapsedMs: 0,
     totalStartTimestamp: 0,
     totalBaseElapsedMs: 0,
+    startDateStr: '',
     routineStartTimeStr: '',
     overtimeNotified: false,
     intervalId: null
@@ -721,6 +740,7 @@
   let triggeredAlarmKeys = loadTriggeredAlarmKeys();
   let activeAlarmItem = null;
   let alarmRepeatIntervalId = null;
+  let alarmSnoozeTimeoutId = null;
   let wakeLockSentinel = null;
 
   function loadTriggeredAlarmKeys() {
@@ -896,10 +916,17 @@
   }
 
   function getCategoryById(catId) {
-    return state.categories.find(c => c.id === catId) || state.categories[0] || {
-      id: 'cat_default',
-      name: '기본',
-      color: '#4F46E5'
+    const found = state.categories.find(c => c.id === catId) || state.categories[0];
+    if (!found) {
+      return {
+        id: 'cat_default',
+        name: '기본',
+        color: '#4F46E5'
+      };
+    }
+    return {
+      ...found,
+      color: sanitizeHexColor(found.color)
     };
   }
 
@@ -1035,15 +1062,15 @@
     if (!text) return null;
 
     let dateStr = selectedDate;
-    if (/\b오늘\b/.test(text)) {
+    if (/(?:^|\s)오늘(?=\s|$)/.test(text)) {
       dateStr = getTodayStr();
-      text = text.replace(/\b오늘\b/g, '').trim();
-    } else if (/\b내일\b/.test(text)) {
+      text = text.replace(/(?:^|\s)오늘(?=\s|$)/g, ' ').trim();
+    } else if (/(?:^|\s)내일(?=\s|$)/.test(text)) {
       dateStr = addDaysStr(getTodayStr(), 1);
-      text = text.replace(/\b내일\b/g, '').trim();
-    } else if (/\b모레\b/.test(text)) {
+      text = text.replace(/(?:^|\s)내일(?=\s|$)/g, ' ').trim();
+    } else if (/(?:^|\s)모레(?=\s|$)/.test(text)) {
       dateStr = addDaysStr(getTodayStr(), 2);
-      text = text.replace(/\b모레\b/g, '').trim();
+      text = text.replace(/(?:^|\s)모레(?=\s|$)/g, ' ').trim();
     }
 
     let important = false;
@@ -1053,8 +1080,7 @@
     }
 
     // 프로젝트 태그 추출 (@신규런칭 등)
-    let projectTag =
-      selectedProjectTag && selectedProjectTag !== '__UNTAGGED__' ? selectedProjectTag : '';
+    let projectTag = getActiveRealProjectTag();
     const atMatch = text.match(/@([^\s#,]+)/);
     if (atMatch) {
       projectTag = cleanProjectTag(atMatch[1]);
@@ -1089,7 +1115,7 @@
       text = text.replace(/매월|매달/g, '').trim();
     } else {
       // 단독 요일 지정 (예: 수요일 14시 회의)
-      const singleDowMatch = text.match(/\b([일월화수목금토])요일\b/);
+      const singleDowMatch = text.match(/(?:^|\s)([일월화수목금토])요일(?=\s|$)/);
       if (singleDowMatch) {
         const targetDow = korDayMap[singleDowMatch[1]];
         if (targetDow !== undefined) {
@@ -1097,7 +1123,7 @@
           const matchedDayObj = weekInfo.days.find(d => d.dayIdx === targetDow);
           if (matchedDayObj) dateStr = matchedDayObj.dateStr;
         }
-        text = text.replace(singleDowMatch[0], '').trim();
+        text = text.replace(singleDowMatch[0], ' ').trim();
       }
     }
 
@@ -1129,41 +1155,67 @@
     // 시간 구간 파싱: 14:00~16:00 또는 오후 2시~4시 또는 14:00
     let startTime = '';
     let endTime = '';
+    let explicitRangeParsed = false;
 
-    const rangeColon = text.match(/(\d{1,2}:\d{2})\s*[~\-]\s*(\d{1,2}:\d{2})/);
+    const toValidHHMM = (rawH, rawM, ampm = '') => {
+      let h = Number(rawH);
+      const m = Math.max(0, Math.min(59, Number(rawM || 0)));
+      if ((ampm === '오후' || ampm === '저녁' || ampm === '밤') && h < 12) h += 12;
+      if ((ampm === '오전' || ampm === '새벽') && h === 12) h = 0;
+      h = Math.max(0, Math.min(23, h));
+      return `${String(h).padStart(2, '0')}:${String(m).padStart(2, '0')}`;
+    };
+
+    const rangeColon = text.match(/(\d{1,2}):(\d{2})\s*[~\-]\s*(\d{1,2}):(\d{2})/);
     if (rangeColon) {
-      startTime = rangeColon[1].padStart(5, '0');
-      endTime = rangeColon[2].padStart(5, '0');
+      startTime = toValidHHMM(rangeColon[1], rangeColon[2]);
+      endTime = toValidHHMM(rangeColon[3], rangeColon[4]);
+      explicitRangeParsed = true;
       text = text.replace(rangeColon[0], '').trim();
     } else {
-      const singleColon = text.match(/(\d{1,2}):(\d{2})/);
-      if (singleColon) {
-        const h = Number(singleColon[1]);
-        const m = Number(singleColon[2]);
-        startTime = `${String(h).padStart(2, '0')}:${String(m).padStart(2, '0')}`;
-        endTime = minutesToTime(h * 60 + m + 60);
-        text = text.replace(singleColon[0], '').trim();
+      const korRange = text.match(
+        /(새벽|오전|오후|저녁|밤)?\s*(\d{1,2})시(?:\s*(\d{1,2})분)?\s*[~\-]\s*(새벽|오전|오후|저녁|밤)?\s*(\d{1,2})시(?:\s*(\d{1,2})분)?/
+      );
+      if (korRange) {
+        const startAmPm = korRange[1] || '';
+        const endAmPm = korRange[4] || startAmPm;
+        startTime = toValidHHMM(korRange[2], korRange[3], startAmPm);
+        endTime = toValidHHMM(korRange[5], korRange[6], endAmPm);
+        if (!korRange[4] && timeToMinutes(endTime) <= timeToMinutes(startTime) && Number(korRange[5]) < 12) {
+          endTime = toValidHHMM(Number(korRange[5]) + 12, korRange[6], '');
+        }
+        explicitRangeParsed = true;
+        text = text.replace(korRange[0], '').trim();
       } else {
-        const korTime = text.match(/(오전|오후|저녁|밤)?\s*(\d{1,2})시(?:\s*(\d{1,2})분)?/);
-        if (korTime) {
-          let h = Number(korTime[2]);
-          const m = Number(korTime[3] || 0);
-          const ampm = korTime[1] || '';
-          if ((ampm === '오후' || ampm === '저녁' || ampm === '밤') && h < 12) h += 12;
-          if (ampm === '오전' && h === 12) h = 0;
-          startTime = `${String(h).padStart(2, '0')}:${String(m).padStart(2, '0')}`;
-          endTime = minutesToTime(h * 60 + m + 60);
-          text = text.replace(korTime[0], '').trim();
+        const singleColon = text.match(/(\d{1,2}):(\d{2})/);
+        if (singleColon) {
+          startTime = toValidHHMM(singleColon[1], singleColon[2]);
+          endTime = minutesToTime(timeToMinutes(startTime) + 60);
+          text = text.replace(singleColon[0], '').trim();
+        } else {
+          const korTime = text.match(/(새벽|오전|오후|저녁|밤)?\s*(\d{1,2})시(?:\s*(\d{1,2})분)?/);
+          if (korTime) {
+            startTime = toValidHHMM(korTime[2], korTime[3], korTime[1] || '');
+            endTime = minutesToTime(timeToMinutes(startTime) + 60);
+            text = text.replace(korTime[0], '').trim();
+          }
         }
       }
     }
 
-    // 소요 시간 표현 (2시간, 30분 등)
-    const durHourMatch = text.match(/(\d+)\s*시간/);
-    if (durHourMatch && startTime && !rangeColon) {
-      const addMins = Number(durHourMatch[1]) * 60;
-      endTime = minutesToTime(timeToMinutes(startTime) + addMins);
-      text = text.replace(durHourMatch[0], '').trim();
+    // 소요 시간 표현 (2시간, 1시간 30분, 30분 등)
+    const durHourMinMatch = text.match(/(\d+)\s*시간(?:\s*(\d+)\s*분)?/);
+    if (durHourMinMatch && startTime && !explicitRangeParsed) {
+      const addMins = Number(durHourMinMatch[1]) * 60 + Number(durHourMinMatch[2] || 0);
+      endTime = minutesToTime(timeToMinutes(startTime) + Math.max(5, addMins));
+      text = text.replace(durHourMinMatch[0], '').trim();
+    } else if (startTime && !explicitRangeParsed) {
+      const durMinMatch = text.match(/(?:^|\s)(\d+)\s*분(?:\s*동안)?(?=\s|$)/);
+      if (durMinMatch) {
+        const addMins = Math.max(5, Number(durMinMatch[1]));
+        endTime = minutesToTime(timeToMinutes(startTime) + addMins);
+        text = text.replace(durMinMatch[0], ' ').trim();
+      }
     }
 
     // 모드 결정
@@ -1179,10 +1231,18 @@
       }
     }
 
-    const cleanTitle = text || '새 항목';
+    const cleanTitle = text.replace(/\s{2,}/g, ' ').trim() || '새 항목';
     if (!startTime) {
       startTime = getNowTimeStr();
       endTime = minutesToTime(timeToMinutes(startTime) + 60);
+    }
+    if (timeToMinutes(endTime) <= timeToMinutes(startTime)) {
+      if (timeToMinutes(startTime) >= 23 * 60 + 55) {
+        startTime = '23:30';
+        endTime = '23:59';
+      } else {
+        endTime = minutesToTime(timeToMinutes(startTime) + 30);
+      }
     }
 
     return {
@@ -1302,18 +1362,30 @@
   }
 
   // -------------------- 전체 UI 렌더링 오케스트레이터 --------------------
-  function renderAll() {
+  function renderActiveTabViews(forceAllTabs = false) {
+    if (forceAllTabs || currentActiveTab === 'dashboard') {
+      renderKPIs();
+      renderMiniCalendar();
+      renderTodoList();
+      renderDualTimeline();
+      renderDashboardRoutines();
+    }
+    if (forceAllTabs || currentActiveTab === 'routines') {
+      renderRoutinePlayerTab();
+    }
+    if (forceAllTabs || currentActiveTab === 'calendar') {
+      renderCalendarOverviewTab();
+    }
+    if (forceAllTabs || currentActiveTab === 'report') {
+      renderReportAndGoalsTab();
+    }
+  }
+
+  function renderAll(forceAllTabs = false) {
     renderHeaderDate();
     renderCategorySelects();
     renderProjectTagFilterBar();
-    renderKPIs();
-    renderMiniCalendar();
-    renderTodoList();
-    renderDualTimeline();
-    renderDashboardRoutines();
-    renderRoutinePlayerTab();
-    renderCalendarOverviewTab();
-    renderReportAndGoalsTab();
+    renderActiveTabViews(forceAllTabs);
     updateTtsButtonUI();
     applyThemeUI();
     updateSyncHeaderUI();
@@ -2001,7 +2073,7 @@
               ${repLabel ? `<span class="repeat-badge">${escapeHtml(repLabel)}</span>` : '<span class="wk-type-tag plan">일정</span>'}
               <span style="font-weight:700;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;${isSchDone ? 'text-decoration:line-through;opacity:0.6;' : ''}">${escapeHtml(sch.title)}</span>
             </div>
-            <span style="font-size:0.72rem;color:#4F46E5;font-weight:700;flex-shrink:0;">${sch.startTime}</span>
+            <span style="font-size:0.72rem;color:var(--primary);font-weight:700;flex-shrink:0;">${sch.startTime}</span>
           `;
           sItem.querySelector('.pg-sch-check').addEventListener('click', e => {
             e.stopPropagation();
@@ -2033,7 +2105,7 @@
       block.innerHTML = `
         <div class="project-group-head">
           <div class="pg-head-left">
-            <span class="pg-tag-badge" style="background:#F1F5F9;color:#475569;">개별 할 일</span>
+            <span class="pg-tag-badge" style="background:var(--bg-subtle);color:var(--text-sub);">개별 할 일</span>
             <span class="pg-meta-stats">${untaggedTodos.length}건</span>
           </div>
           <div class="pg-head-right">
@@ -2414,7 +2486,7 @@
           ${rtn.steps.map(s => `<span class="rmc-step-chip">${escapeHtml(s.title)} ${s.minutes}분</span>`).join('')}
         </div>
         <div class="rmc-foot">
-          <span style="font-size:0.76rem;font-weight:700;color:${isDoneToday ? '#059669' : '#64748B'}">
+          <span style="font-size:0.76rem;font-weight:700;color:${isDoneToday ? 'var(--success)' : 'var(--text-sub)'}">
             ${isDoneToday ? '오늘 완주 완료' : '실행 대기 중'}
           </span>
           <div style="display:flex;gap:6px;">
@@ -2450,10 +2522,9 @@
     liveTracker.title = String(title || titleInput.value || '집중 작업').trim();
     liveTracker.categoryId = categoryId || catSelect.value || state.categories[0].id;
     liveTracker.projectTag = cleanProjectTag(
-      projectTag ||
-        (tagInput && tagInput.value) ||
-        (selectedProjectTag && selectedProjectTag !== '__UNTAGGED__' ? selectedProjectTag : '')
+      projectTag || (tagInput && tagInput.value) || getActiveRealProjectTag()
     );
+    liveTracker.startDateStr = getTodayStr();
     liveTracker.startTimestamp = Date.now();
     liveTracker.startTimeStr = getNowTimeStr();
     liveTracker.elapsedSeconds = 0;
@@ -2501,15 +2572,19 @@
     releaseWakeLock();
 
     const elapsedMins = Math.max(5, Math.round(liveTracker.elapsedSeconds / 60));
-    const startTime = liveTracker.startTimeStr || getNowTimeStr();
+    let startTime = liveTracker.startTimeStr || getNowTimeStr();
+    if (timeToMinutes(startTime) >= 23 * 60 + 55) {
+      startTime = '23:54';
+    }
     const endTime = minutesToTime(timeToMinutes(startTime) + elapsedMins);
+    const recordDate = liveTracker.startDateStr || getTodayStr();
     const tagInput = document.getElementById('liveTrackerProjectTag');
     const finalTag = cleanProjectTag((tagInput && tagInput.value) || liveTracker.projectTag);
 
     state.actualLogs.push({
       id: uid('act'),
       title: liveTracker.title,
-      date: getTodayStr(),
+      date: recordDate,
       startTime,
       endTime,
       categoryId: liveTracker.categoryId,
@@ -2621,6 +2696,7 @@
     routinePlayer.stepBaseElapsedMs = 0;
     routinePlayer.totalStartTimestamp = now;
     routinePlayer.totalBaseElapsedMs = 0;
+    routinePlayer.startDateStr = getTodayStr();
     routinePlayer.routineStartTimeStr = getNowTimeStr();
     routinePlayer.overtimeNotified = false;
 
@@ -2730,13 +2806,17 @@
     // 실제 소요 시간을 타임트래커 실제 기록에 자동 반영
     const plannedMins = rtn.steps.reduce((acc, s) => acc + Number(s.minutes || 0), 0);
     const actualMins = Math.max(5, Math.round(routinePlayer.totalElapsedSeconds / 60) || plannedMins);
-    const startTime = routinePlayer.routineStartTimeStr || getNowTimeStr();
+    let startTime = routinePlayer.routineStartTimeStr || getNowTimeStr();
+    if (timeToMinutes(startTime) >= 23 * 60 + 55) {
+      startTime = '23:54';
+    }
     const endTime = minutesToTime(timeToMinutes(startTime) + actualMins);
+    const recordDate = routinePlayer.startDateStr || todayStr;
 
     state.actualLogs.push({
       id: uid('act'),
       title: `${rtn.name} 완주`,
-      date: todayStr,
+      date: recordDate,
       startTime,
       endTime,
       categoryId: rtn.categoryId
@@ -2786,7 +2866,25 @@
     const btnSkip = document.getElementById('playerSkipStepBtn');
     const btnStop = document.getElementById('playerStopRoutineBtn');
 
-    if (!rtn) return;
+    if (!rtn) {
+      if (nameEl) nameEl.textContent = '등록된 루틴이 없습니다';
+      if (badgeEl) badgeEl.textContent = '대기';
+      if (stepCounterEl) stepCounterEl.textContent = '0 / 0 단계';
+      if (totalRemainEl) totalRemainEl.textContent = '총 0분';
+      if (stepTitleEl) stepTitleEl.textContent = '새 루틴을 추가해 보세요';
+      if (countdownEl) countdownEl.textContent = '00:00';
+      overtimeEl?.classList.add('hidden');
+      if (tipEl) tipEl.textContent = '좌측 루틴 목록에서 새 루틴을 만들거나 AI 루틴 생성을 이용해 보세요.';
+      if (nextStepEl) nextStepEl.textContent = '루틴을 시작하면 다음 단계가 이곳에 표시됩니다.';
+      if (queueListEl) queueListEl.innerHTML = '';
+      if (btnPrev) btnPrev.disabled = true;
+      if (btnComplete) btnComplete.disabled = true;
+      if (btnAdd5) btnAdd5.disabled = true;
+      if (btnPause) btnPause.disabled = true;
+      if (btnSkip) btnSkip.disabled = true;
+      if (btnStop) btnStop.disabled = true;
+      return;
+    }
 
     const cat = getCategoryById(rtn.categoryId);
     const totalMins = rtn.steps.reduce((acc, s) => acc + Number(s.minutes || 0), 0);
@@ -2871,17 +2969,31 @@
     const typeEl = document.getElementById('bannerTimerType');
     const titleEl = document.getElementById('bannerTimerTitle');
     const clockEl = document.getElementById('bannerTimerClock');
+    const pauseBtn = document.getElementById('bannerPauseBtn');
+    const completeBtn = document.getElementById('bannerCompleteBtn');
 
     if (routinePlayer.running) {
       const rtn = state.routines.find(r => r.id === routinePlayer.activeRoutineId);
       const step = rtn?.steps?.[routinePlayer.stepIndex];
-      const remain = Math.max(0, routinePlayer.stepTargetSeconds - routinePlayer.stepElapsedSeconds);
-      const mm = String(Math.floor(remain / 60)).padStart(2, '0');
-      const ss = String(remain % 60).padStart(2, '0');
+      const remain = routinePlayer.stepTargetSeconds - routinePlayer.stepElapsedSeconds;
       banner.classList.remove('hidden');
-      typeEl.textContent = '루틴 실행 중';
+      typeEl.textContent = routinePlayer.paused ? '루틴 일시정지' : '루틴 실행 중';
       titleEl.textContent = `${rtn ? rtn.name : ''} · ${step ? step.title : ''}`;
-      clockEl.textContent = `${mm}:${ss}`;
+      if (remain >= 0) {
+        const mm = String(Math.floor(remain / 60)).padStart(2, '0');
+        const ss = String(remain % 60).padStart(2, '0');
+        clockEl.textContent = `${mm}:${ss}`;
+      } else {
+        const over = Math.abs(remain);
+        const mm = String(Math.floor(over / 60)).padStart(2, '0');
+        const ss = String(over % 60).padStart(2, '0');
+        clockEl.textContent = `+${mm}:${ss}`;
+      }
+      if (pauseBtn) {
+        pauseBtn.classList.remove('hidden');
+        pauseBtn.textContent = routinePlayer.paused ? '다시 시작' : '일시정지';
+      }
+      if (completeBtn) completeBtn.textContent = '단계 완료';
       return;
     }
 
@@ -2893,6 +3005,8 @@
       typeEl.textContent = '타임트래커 측정 중';
       titleEl.textContent = liveTracker.title;
       clockEl.textContent = `${mm}:${ss}`;
+      if (pauseBtn) pauseBtn.classList.add('hidden');
+      if (completeBtn) completeBtn.textContent = '측정 완료';
       return;
     }
 
@@ -3442,10 +3556,14 @@
     const table = document.createElement('div');
     table.className = 'wk-timetable-grid';
 
-    // 1. 헤더 행
+    // 1. 헤더 행 및 요일·시간대별 인덱스 사전 구성
     const headRow = document.createElement('div');
     headRow.className = 'wk-tt-row wk-tt-header-row';
     headRow.innerHTML = `<div class="wk-tt-time-cell">시간</div>`;
+
+    let minWeekHour = 6;
+    const plansByDayHour = new Map();
+    const actualsByDayHour = new Map();
 
     weekInfo.days.forEach(dayObj => {
       const dStr = dayObj.dateStr;
@@ -3458,6 +3576,22 @@
       const dayTodos = state.todos.filter(
         t => matchesSelectedProjectTag(t) && doesItemOccurOnDate(t, dStr, true)
       );
+
+      const pBuckets = Array.from({ length: 24 }, () => []);
+      dayPlans.forEach(s => {
+        const h = Math.max(0, Math.min(23, Math.floor(timeToMinutes(s.startTime) / 60)));
+        pBuckets[h].push(s);
+        if (showPlan && h < minWeekHour) minWeekHour = h;
+      });
+      plansByDayHour.set(dStr, pBuckets);
+
+      const aBuckets = Array.from({ length: 24 }, () => []);
+      dayActuals.forEach(a => {
+        const h = Math.max(0, Math.min(23, Math.floor(timeToMinutes(a.startTime) / 60)));
+        aBuckets[h].push(a);
+        if (showActual && h < minWeekHour) minWeekHour = h;
+      });
+      actualsByDayHour.set(dStr, aBuckets);
 
       const pMins = dayPlans.reduce((s, x) => s + durationMinutes(x.startTime, x.endTime), 0);
       const aMins = dayActuals.reduce((s, x) => s + durationMinutes(x.startTime, x.endTime), 0);
@@ -3481,27 +3615,7 @@
     table.appendChild(headRow);
 
     // 2. 시간 행 (조기 일정이 있으면 06시 이전부터 자동 표시)
-    let minWeekHour = 6;
-    weekInfo.days.forEach(dayObj => {
-      const dStr = dayObj.dateStr;
-      if (showPlan) {
-        state.schedules
-          .filter(s => matchesSelectedProjectTag(s) && doesItemOccurOnDate(s, dStr, false))
-          .forEach(s => {
-            const h = Math.floor(timeToMinutes(s.startTime) / 60);
-            if (h >= 0 && h < minWeekHour) minWeekHour = h;
-          });
-      }
-      if (showActual) {
-        state.actualLogs
-          .filter(a => matchesSelectedProjectTag(a) && a.date === dStr)
-          .forEach(a => {
-            const h = Math.floor(timeToMinutes(a.startTime) / 60);
-            if (h >= 0 && h < minWeekHour) minWeekHour = h;
-          });
-      }
-    });
-
+    const rowsFrag = document.createDocumentFragment();
     for (let hour = minWeekHour; hour <= 23; hour++) {
       const hourStr = `${String(hour).padStart(2, '0')}:00`;
       const nextHourStr = hour === 23 ? '23:59' : `${String(hour + 1).padStart(2, '0')}:00`;
@@ -3524,12 +3638,7 @@
         });
 
         if (showPlan) {
-          const plansInHour = state.schedules.filter(
-            s =>
-              matchesSelectedProjectTag(s) &&
-              doesItemOccurOnDate(s, dStr, false) &&
-              Math.floor(timeToMinutes(s.startTime) / 60) === hour
-          );
+          const plansInHour = plansByDayHour.get(dStr)?.[hour] || [];
           plansInHour.forEach(p => {
             const cat = getCategoryById(p.categoryId);
             const isPlanDone = isItemCompletedOnDate(p, dStr);
@@ -3560,12 +3669,7 @@
         }
 
         if (showActual) {
-          const actualsInHour = state.actualLogs.filter(
-            a =>
-              matchesSelectedProjectTag(a) &&
-              a.date === dStr &&
-              Math.floor(timeToMinutes(a.startTime) / 60) === hour
-          );
+          const actualsInHour = actualsByDayHour.get(dStr)?.[hour] || [];
           actualsInHour.forEach(a => {
             const cat = getCategoryById(a.categoryId);
             const dur = durationMinutes(a.startTime, a.endTime);
@@ -3604,9 +3708,10 @@
         row.appendChild(slot);
       });
 
-      table.appendChild(row);
+      rowsFrag.appendChild(row);
     }
 
+    table.appendChild(rowsFrag);
     container.appendChild(table);
     return { totalPlanMins, totalActualMins, totalTodos };
   }
@@ -3951,7 +4056,7 @@
               </td>
               <td>${formatDurationKo(c.planMinutes)}</td>
               <td><strong>${formatDurationKo(c.actualMinutes)}</strong></td>
-              <td style="color:${diffMins < 0 ? '#D97706' : '#059669'};font-weight:700;">
+              <td style="color:${diffMins < 0 ? 'var(--amber)' : 'var(--success)'};font-weight:700;">
                 ${diffSign}${formatDurationKo(Math.abs(diffMins))}
               </td>
               <td><span class="kpi-badge">${execRate}%</span></td>
@@ -4014,10 +4119,13 @@
       }
     }
 
-    // 3. 우측: 회고 노트 반영
-    document.getElementById('reviewKeepInput').value = state.reviewNotes.keep || '';
-    document.getElementById('reviewProblemInput').value = state.reviewNotes.problem || '';
-    document.getElementById('reviewTryInput').value = state.reviewNotes.tryAction || '';
+    // 3. 우측: 회고 노트 반영 (입력 포커스 중에는 덮어쓰지 않음)
+    const keepEl = document.getElementById('reviewKeepInput');
+    const probEl = document.getElementById('reviewProblemInput');
+    const tryEl = document.getElementById('reviewTryInput');
+    if (keepEl && document.activeElement !== keepEl) keepEl.value = state.reviewNotes.keep || '';
+    if (probEl && document.activeElement !== probEl) probEl.value = state.reviewNotes.problem || '';
+    if (tryEl && document.activeElement !== tryEl) tryEl.value = state.reviewNotes.tryAction || '';
 
     // 4. 다음 달 카테고리별 시간 예산 편집기
     const budgetList = document.getElementById('timeBudgetEditorList');
@@ -4138,17 +4246,17 @@
       const targetMins = timeToMinutes(s.startTime);
       const leadMins = Math.max(0, Number(s.alarmLeadMinutes || 0));
 
-      // 사전 예고 알림 확인
+      // 사전 예고 알림 확인 (사전 예고 시각~시작 시각 직전 구간 보정 포함)
       if (leadMins > 0) {
         const preTarget = targetMins - leadMins;
-        if (nowMins >= preTarget && nowMins < targetMins && nowMins - preTarget <= 3) {
+        if (nowMins >= preTarget && nowMins < targetMins) {
           const preKey = `pre_sch_${s.id}_${todayStr}_${s.startTime}_${leadMins}`;
           if (!triggeredAlarmKeys.has(preKey)) {
             markAlarmKeyTriggered(preKey);
             triggerAlarmModal({
               type: 'schedule',
               alarmKind: 'pre',
-              leadMinutes: leadMins,
+              leadMinutes: Math.max(1, targetMins - nowMins),
               title: s.title,
               time: s.startTime,
               categoryId: s.categoryId,
@@ -4194,14 +4302,14 @@
 
       if (leadMins > 0) {
         const preTarget = targetMins - leadMins;
-        if (nowMins >= preTarget && nowMins < targetMins && nowMins - preTarget <= 3) {
+        if (nowMins >= preTarget && nowMins < targetMins) {
           const preKey = `pre_rtn_${r.id}_${todayStr}_${r.startTime}_${leadMins}`;
           if (!triggeredAlarmKeys.has(preKey)) {
             markAlarmKeyTriggered(preKey);
             triggerAlarmModal({
               type: 'routine',
               alarmKind: 'pre',
-              leadMinutes: leadMins,
+              leadMinutes: Math.max(1, targetMins - nowMins),
               title: r.name,
               time: r.startTime,
               categoryId: r.categoryId,
@@ -4327,19 +4435,26 @@
 
     if (aiRes) {
       let addedCount = 0;
+      const fallbackTag = getActiveRealProjectTag();
       if (Array.isArray(aiRes.schedules)) {
         aiRes.schedules.forEach(s => {
+          const st = s.startTime || '09:00';
+          let et = s.endTime || '10:00';
+          if (timeToMinutes(et) <= timeToMinutes(st)) {
+            et = minutesToTime(timeToMinutes(st) + 30);
+          }
           state.schedules.push({
             id: uid('sch'),
             title: s.title || '새 일정',
             date: s.date || selectedDate,
-            startTime: s.startTime || '09:00',
-            endTime: s.endTime || '10:00',
+            startTime: st,
+            endTime: et,
             categoryId: s.categoryId || state.categories[0].id,
-            projectTag: cleanProjectTag(s.projectTag || selectedProjectTag),
+            projectTag: cleanProjectTag(s.projectTag || fallbackTag),
             repeat: s.repeat || 'none',
             completedDates: [],
             alarm: s.alarm !== false,
+            alarmLeadMinutes: Number(s.alarmLeadMinutes || 0),
             important: Boolean(s.important),
             completed: false
           });
@@ -4353,7 +4468,7 @@
             title: t.title || '새 할 일',
             dueDate: t.dueDate || selectedDate,
             categoryId: t.categoryId || state.categories[0].id,
-            projectTag: cleanProjectTag(t.projectTag || selectedProjectTag),
+            projectTag: cleanProjectTag(t.projectTag || fallbackTag),
             repeat: t.repeat || 'none',
             completedDates: [],
             estimatedMinutes: Number(t.estimatedMinutes || 30),
@@ -4365,14 +4480,19 @@
       }
       if (Array.isArray(aiRes.actualLogs)) {
         aiRes.actualLogs.forEach(a => {
+          const st = a.startTime || '14:00';
+          let et = a.endTime || '15:00';
+          if (timeToMinutes(et) <= timeToMinutes(st)) {
+            et = minutesToTime(timeToMinutes(st) + 30);
+          }
           state.actualLogs.push({
             id: uid('act'),
             title: a.title || '실제 기록',
             date: a.date || selectedDate,
-            startTime: a.startTime || '14:00',
-            endTime: a.endTime || '15:00',
+            startTime: st,
+            endTime: et,
             categoryId: a.categoryId || state.categories[0].id,
-            projectTag: cleanProjectTag(a.projectTag || selectedProjectTag)
+            projectTag: cleanProjectTag(a.projectTag || fallbackTag)
           });
           addedCount++;
         });
@@ -4400,7 +4520,7 @@
 
   function applyParsedQuickItem(parsed) {
     if (!parsed) return;
-    const tag = cleanProjectTag(parsed.projectTag || selectedProjectTag);
+    const tag = cleanProjectTag(parsed.projectTag || getActiveRealProjectTag());
     const repeat = parsed.repeat || 'none';
     if (parsed.type === 'actual') {
       state.actualLogs.push({
@@ -4424,6 +4544,7 @@
         repeat,
         completedDates: [],
         alarm: true,
+        alarmLeadMinutes: 0,
         important: parsed.important,
         completed: false
       });
@@ -4505,62 +4626,116 @@
     btn.textContent = 'AI 루틴 생성';
   }
 
-  // AI 남은 일정 원클릭 재배치
+  // AI 남은 일정 원클릭 재배치 (정기 반복 일정은 고정 시간으로 보호, 실행 취소 지원)
   async function handleAiRescheduleDay() {
+    const movableSchedules = state.schedules.filter(
+      s => s.date === selectedDate && (!s.repeat || s.repeat === 'none') && !isItemCompletedOnDate(s, selectedDate)
+    );
+    const fixedSchedules = state.schedules.filter(
+      s =>
+        doesItemOccurOnDate(s, selectedDate, false) &&
+        ((s.repeat && s.repeat !== 'none') || isItemCompletedOnDate(s, selectedDate))
+    );
+    const pendingTodos = state.todos.filter(
+      t => !isItemCompletedOnDate(t, selectedDate) && (doesItemOccurOnDate(t, selectedDate, true) || !t.dueDate)
+    );
+
+    if (movableSchedules.length === 0 && pendingTodos.length === 0) {
+      showToast('선택한 날짜에 재배치할 미완료 일정이나 할 일이 없습니다.');
+      return;
+    }
+
     const btn = document.getElementById('aiRescheduleBtn');
     btn.disabled = true;
     btn.textContent = '재배치 계산 중...';
 
-    const pendingSchedules = state.schedules.filter(s => s.date === selectedDate && !s.completed);
-    const pendingTodos = state.todos.filter(t => !t.completed && (t.dueDate === selectedDate || !t.dueDate));
-
     const aiRes = await callCloudflareAi('reschedule_day', {
-      currentTime: getNowTimeStr(),
+      currentTime: selectedDate === getTodayStr() ? getNowTimeStr() : '09:00',
       todayDate: selectedDate,
-      schedules: pendingSchedules,
+      schedules: movableSchedules,
+      fixedSchedules,
       todos: pendingTodos
     });
 
+    pushUndoSnapshot('AI 일정 재배치');
+    const movableMapByTitle = new Map(movableSchedules.map(s => [s.title, s]));
+    const movableIdSet = new Set(movableSchedules.map(s => s.id));
+
     if (aiRes && Array.isArray(aiRes.rearrangedSchedules) && aiRes.rearrangedSchedules.length > 0) {
-      // 기존 오늘 미완료 일정 제거 후 재배치 일정 반영
-      state.schedules = state.schedules.filter(s => !(s.date === selectedDate && !s.completed));
+      state.schedules = state.schedules.filter(s => !movableIdSet.has(s.id));
       aiRes.rearrangedSchedules.forEach(rs => {
+        const orig = movableMapByTitle.get(rs.title);
+        const st = rs.startTime || '15:00';
+        let et = rs.endTime || '16:00';
+        if (timeToMinutes(et) <= timeToMinutes(st)) {
+          et = minutesToTime(timeToMinutes(st) + 30);
+        }
         state.schedules.push({
           id: uid('sch'),
-          title: rs.title,
+          title: rs.title || '재배치 일정',
           date: selectedDate,
-          startTime: rs.startTime || '15:00',
-          endTime: rs.endTime || '16:00',
-          categoryId: rs.categoryId || state.categories[0].id,
-          alarm: true,
-          important: Boolean(rs.important),
+          startTime: st,
+          endTime: et,
+          categoryId: rs.categoryId || orig?.categoryId || state.categories[0].id,
+          projectTag: cleanProjectTag(rs.projectTag || orig?.projectTag || getActiveRealProjectTag()),
+          repeat: 'none',
+          completedDates: [],
+          alarm: orig ? orig.alarm !== false : true,
+          alarmLeadMinutes: Number(orig?.alarmLeadMinutes || 0),
+          important: rs.important !== undefined ? Boolean(rs.important) : Boolean(orig?.important),
           completed: false
         });
       });
       saveState();
       renderAll();
-      showToast(aiRes.advice || '남은 하루 시간대에 맞춰 미완료 일정을 최적 재배치했습니다.');
+      showToast(aiRes.advice || '남은 하루 시간대에 맞춰 미완료 일정을 최적 재배치했습니다.', { withUndo: true });
     } else {
-      // 내장 스마트 재배치 알고리즘: 현재 시각 이후 다음 정각부터 중요도 순으로 1시간씩 순차 배치
-      const nowMins = Math.max(9 * 60, timeToMinutes(getNowTimeStr()));
-      let cursorMins = Math.ceil(nowMins / 30) * 30;
-      const sorted = [...pendingSchedules].sort((a, b) => Number(b.important) - Number(a.important));
+      // 내장 스마트 재배치 알고리즘: 고정·정기 일정 구간을 피해 빈 시간대에 순차 배치
+      const occupiedIntervals = fixedSchedules
+        .map(fs => ({
+          start: timeToMinutes(fs.startTime),
+          end: timeToMinutes(fs.endTime)
+        }))
+        .sort((a, b) => a.start - b.start);
+
+      const baseMins =
+        selectedDate === getTodayStr() ? Math.max(9 * 60, timeToMinutes(getNowTimeStr())) : 9 * 60;
+      let cursorMins = Math.ceil(baseMins / 30) * 30;
+      const sorted = [...movableSchedules].sort((a, b) => Number(b.important) - Number(a.important));
+
+      const findNextFreeSlot = (fromMins, durMins) => {
+        let candidate = fromMins;
+        let conflict = true;
+        while (conflict && candidate + durMins <= 23 * 60 + 30) {
+          conflict = false;
+          for (let i = 0; i < occupiedIntervals.length; i++) {
+            const occ = occupiedIntervals[i];
+            if (candidate < occ.end && candidate + durMins > occ.start) {
+              candidate = Math.ceil((occ.end + 10) / 15) * 15;
+              conflict = true;
+              break;
+            }
+          }
+        }
+        return candidate;
+      };
 
       sorted.forEach(s => {
         const dur = durationMinutes(s.startTime, s.endTime);
-        if (cursorMins + dur <= 23 * 60) {
-          s.startTime = minutesToTime(cursorMins);
-          s.endTime = minutesToTime(cursorMins + dur);
-          cursorMins += dur + 15; // 15분 휴식 버퍼 자동 삽입
+        const slotStart = findNextFreeSlot(cursorMins, dur);
+        if (slotStart + dur <= 23 * 60 + 30) {
+          s.startTime = minutesToTime(slotStart);
+          s.endTime = minutesToTime(slotStart + dur);
+          occupiedIntervals.push({ start: slotStart, end: slotStart + dur });
+          cursorMins = slotStart + dur + 15;
         } else {
-          // 오늘 밤 11시를 넘기면 내일로 자동 이월
           s.date = addDaysStr(selectedDate, 1);
         }
       });
 
       saveState();
       renderAll();
-      showToast('현재 시각 기준으로 남은 일정을 15분 여유 버퍼와 함께 재배치했습니다.');
+      showToast('고정·정기 일정을 피해 남은 일정을 15분 여유 버퍼와 함께 재배치했습니다.', { withUndo: true });
     }
 
     btn.disabled = false;
@@ -4800,7 +4975,7 @@
       </div>
       <input type="text" class="step-row-title" placeholder="행동 이름" value="${escapeHtml(title)}" required />
       <input type="number" class="step-row-mins" min="1" max="180" value="${Number(minutes || 5)}" title="목표 시간 분 단위" />
-      <span style="font-size:0.78rem;color:#64748B;">분</span>
+      <span style="font-size:0.78rem;color:var(--text-sub);">분</span>
       <input type="text" class="step-row-tip" placeholder="음성 안내 팁" value="${escapeHtml(tip || '')}" />
       <button type="button" class="btn-xs btn-danger-ghost step-row-del" title="단계 삭제">&times;</button>
     `;
@@ -4874,6 +5049,15 @@
   function normalizeImportedState(rawState) {
     const fallback = createInitialState();
     if (!rawState || typeof rawState !== 'object') return fallback;
+    const rawCats =
+      Array.isArray(rawState.categories) && rawState.categories.length > 0
+        ? rawState.categories.map(c => ({
+            ...c,
+            id: String(c.id || uid('cat')),
+            name: String(c.name || '카테고리').trim() || '카테고리',
+            color: sanitizeHexColor(c.color)
+          }))
+        : fallback.categories;
     return {
       ...fallback,
       ...rawState,
@@ -4881,7 +5065,7 @@
       settings: { ...fallback.settings, ...(rawState.settings || {}) },
       reviewNotes: { ...fallback.reviewNotes, ...(rawState.reviewNotes || {}) },
       timeBudgets: { ...fallback.timeBudgets, ...(rawState.timeBudgets || {}) },
-      categories: Array.isArray(rawState.categories) && rawState.categories.length > 0 ? rawState.categories : fallback.categories,
+      categories: rawCats,
       schedules: Array.isArray(rawState.schedules) ? rawState.schedules : fallback.schedules,
       actualLogs: Array.isArray(rawState.actualLogs) ? rawState.actualLogs : fallback.actualLogs,
       todos: Array.isArray(rawState.todos) ? rawState.todos : fallback.todos,
@@ -4913,19 +5097,22 @@
     }
   }
 
-  async function pushStateToCloudRaw(rawCode) {
+  async function pushStateToCloudRaw(rawCode, useKeepalive = false) {
     const code = String(rawCode || '').trim().toUpperCase();
     if (code.length < 3) throw new Error('동기화 코드 부족');
     const dbKey = `TIMEFLOW:${code}`;
 
     let savedOk = false;
     let cloudUpdatedAt = state.updatedAt || new Date().toISOString();
+    const workerBody = JSON.stringify({ action: 'save', syncCode: code, state });
+    const canKeepalive = useKeepalive && workerBody.length < 60000;
 
     try {
       const workerRes = await fetch('/api/sync', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ action: 'save', syncCode: code, state })
+        body: workerBody,
+        keepalive: canKeepalive
       });
       if (workerRes.ok) {
         const wData = await workerRes.json().catch(() => null);
@@ -4938,6 +5125,11 @@
 
     if (!savedOk) {
       const nowIso = new Date().toISOString();
+      const sbBody = JSON.stringify({
+        code: dbKey,
+        room_data: state,
+        updated_at: nowIso
+      });
       const res = await fetch(`${SUPABASE_URL}/rest/v1/escape_rooms`, {
         method: 'POST',
         headers: {
@@ -4946,11 +5138,8 @@
           'Content-Type': 'application/json',
           Prefer: 'resolution=merge-duplicates,return=minimal'
         },
-        body: JSON.stringify({
-          code: dbKey,
-          room_data: state,
-          updated_at: nowIso
-        })
+        body: sbBody,
+        keepalive: useKeepalive && sbBody.length < 60000
       });
       if (!res.ok) throw new Error('업로드 실패');
       cloudUpdatedAt = nowIso;
@@ -5007,9 +5196,15 @@
 
     clearTimeout(autoSyncTimerId);
     autoSyncTimerId = setTimeout(async () => {
+      autoSyncTimerId = null;
+      if (isSyncInFlight) {
+        scheduleAutoCloudSave();
+        return;
+      }
+      isSyncInFlight = true;
       try {
         updateSyncHeaderUI('syncing');
-        const cloudUpdatedAt = await pushStateToCloudRaw(rawCode);
+        const cloudUpdatedAt = await pushStateToCloudRaw(rawCode, false);
         state.updatedAt = cloudUpdatedAt || state.updatedAt;
         try {
           localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
@@ -5021,15 +5216,28 @@
         }
       } catch (_) {
         updateSyncHeaderUI('error');
+      } finally {
+        isSyncInFlight = false;
       }
     }, 2200);
+  }
+
+  function flushPendingAutoCloudSave() {
+    if (!autoSyncTimerId) return;
+    clearTimeout(autoSyncTimerId);
+    autoSyncTimerId = null;
+    const rawCode = String(state.settings.syncCode || '').trim().toUpperCase();
+    if (rawCode.length < 3 || state.settings.autoSync === false || isSyncInFlight) return;
+    pushStateToCloudRaw(rawCode, true).catch(() => {});
   }
 
   async function checkCloudLatestOnStartup(silent = true) {
     const rawCode = String(state.settings.syncCode || '').trim().toUpperCase();
     if (rawCode.length < 3 || state.settings.autoSync === false) return;
+    if (isSyncInFlight || autoSyncTimerId) return;
 
     lastAutoCloudPullAt = Date.now();
+    isSyncInFlight = true;
     try {
       updateSyncHeaderUI('syncing');
       const pulled = await pullStateFromCloudRaw(rawCode);
@@ -5062,6 +5270,8 @@
       }
     } catch (_) {
       updateSyncHeaderUI('error');
+    } finally {
+      isSyncInFlight = false;
     }
   }
 
@@ -5671,6 +5881,10 @@
   function applyThemeUI() {
     const isDark = Boolean(state.settings && state.settings.darkMode);
     document.documentElement.setAttribute('data-theme', isDark ? 'dark' : 'light');
+    const metaTheme = document.getElementById('metaThemeColor');
+    if (metaTheme) {
+      metaTheme.setAttribute('content', isDark ? '#0F172A' : '#4F46E5');
+    }
     const btn = document.getElementById('themeToggleBtn');
     const label = document.getElementById('themeToggleLabel');
     if (btn) btn.classList.toggle('active', isDark);
@@ -5841,12 +6055,18 @@
 
   // -------------------- 탭 전환 및 유틸리티 --------------------
   function switchTab(tabName) {
+    if (!tabName) return;
+    const changed = currentActiveTab !== tabName;
+    currentActiveTab = tabName;
     document.querySelectorAll('.nav-tab').forEach(btn => {
       btn.classList.toggle('active', btn.dataset.tab === tabName);
     });
     document.querySelectorAll('.tab-view').forEach(sec => {
       sec.classList.toggle('active', sec.id === `tab-${tabName}`);
     });
+    if (changed) {
+      renderActiveTabViews(false);
+    }
     if (window.innerWidth <= 768) {
       window.scrollTo({ top: 0, behavior: 'smooth' });
     }
@@ -5874,7 +6094,6 @@
     document.querySelectorAll('.nav-tab').forEach(btn => {
       btn.addEventListener('click', () => {
         switchTab(btn.dataset.tab);
-        renderAll();
       });
     });
 
@@ -6493,8 +6712,19 @@
       closeAlarmModal();
       showToast('5분 뒤에 다시 알람이 울립니다.');
       if (item) {
-        setTimeout(() => {
-          triggerAlarmModal(item);
+        clearTimeout(alarmSnoozeTimeoutId);
+        alarmSnoozeTimeoutId = setTimeout(() => {
+          alarmSnoozeTimeoutId = null;
+          const todayStr = getTodayStr();
+          if (item.type === 'schedule' && item.refId) {
+            const sch = state.schedules.find(s => s.id === item.refId);
+            if (!sch || isItemCompletedOnDate(sch, todayStr)) return;
+          } else if (item.type === 'routine' && item.refId) {
+            const rtn = state.routines.find(r => r.id === item.refId);
+            if (!rtn || (Array.isArray(rtn.completedDates) && rtn.completedDates.includes(todayStr))) return;
+            if (routinePlayer.running && routinePlayer.activeRoutineId === rtn.id) return;
+          }
+          triggerAlarmModal({ ...item, alarmKind: 'ontime' });
         }, 300000);
       }
     });
@@ -6673,8 +6903,11 @@
     document.addEventListener('visibilitychange', () => {
       if (document.visibilityState === 'visible') {
         handleAppWakeup();
+      } else {
+        flushPendingAutoCloudSave();
       }
     });
+    window.addEventListener('pagehide', flushPendingAutoCloudSave);
     window.addEventListener('focus', handleAppWakeup);
   }
 

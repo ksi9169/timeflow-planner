@@ -115,6 +115,26 @@ button, input, select, textarea {
   gap: 8px;
 }
 
+.active-timer-banner .btn-ghost {
+  color: #E2E8F0;
+  border-color: rgba(255, 255, 255, 0.2);
+}
+.active-timer-banner .btn-ghost:hover:not(:disabled) {
+  background: rgba(255, 255, 255, 0.14);
+  color: #FFFFFF;
+}
+
+.active-timer-banner .btn-outline {
+  background: rgba(255, 255, 255, 0.12);
+  color: #FFFFFF;
+  border-color: rgba(255, 255, 255, 0.3);
+}
+.active-timer-banner .btn-outline:hover:not(:disabled) {
+  background: rgba(255, 255, 255, 0.22);
+  border-color: #38BDF8;
+  color: #FFFFFF;
+}
+
 /* ==================== 최상단 헤더 ==================== */
 .app-header {
   background: var(--bg-card);
@@ -3342,6 +3362,36 @@ button:disabled {
   border-left: 4px solid #38BDF8;
 }
 
+[data-theme="dark"] .ms-type-badge.deadline,
+[data-theme="dark"] .ms-dday-badge.dday-overdue,
+[data-theme="dark"] .mc-deadline-badge {
+  background: rgba(239, 68, 68, 0.18);
+  border-color: rgba(248, 113, 113, 0.45);
+  color: #FCA5A5;
+}
+
+[data-theme="dark"] .ms-type-badge.important,
+[data-theme="dark"] .mc-imp-badge {
+  background: rgba(245, 158, 11, 0.18);
+  border-color: rgba(251, 191, 36, 0.45);
+  color: #FCD34D;
+}
+
+[data-theme="dark"] .wk-type-tag.plan {
+  background: rgba(99, 102, 241, 0.22);
+  color: #A5B4FC;
+}
+
+[data-theme="dark"] .wk-type-tag.actual {
+  background: rgba(16, 185, 129, 0.22);
+  color: #6EE7B7;
+}
+
+[data-theme="dark"] .wk-type-tag.todo {
+  background: rgba(245, 158, 11, 0.22);
+  color: #FCD34D;
+}
+
 /* ==================== 반응형 미디어 쿼리 & 모바일 최적화 ==================== */
 @media (max-width: 1220px) {
   .dashboard-three-col {
@@ -3429,6 +3479,14 @@ button:disabled {
   .week-matrix-grid,
   .dash-week-grid {
     grid-template-columns: 1fr;
+  }
+  .month-cal-container {
+    overflow-x: auto;
+    -webkit-overflow-scrolling: touch;
+  }
+  .month-cal-container .month-cal-weekdays,
+  .month-cal-container .month-cal-grid {
+    min-width: 520px;
   }
   .form-row.two-col {
     grid-template-columns: 1fr;
