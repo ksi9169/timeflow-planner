@@ -930,17 +930,54 @@
     };
   }
 
-  // -------------------- 사운드(Web Audio API) & 한국어 음성 안내(TTS) --------------------
+  // -------------------- 사운드(Web Audio API) & 한국어 음성 안내(TTS) · iOS Safari 호환 --------------------
   let audioCtx = null;
+  let audioUnlockedOnce = false;
+  let cachedKoreanVoice = null;
+
+  function refreshKoreanSpeechVoice() {
+    if (!('speechSynthesis' in window)) return;
+    try {
+      const voices = window.speechSynthesis.getVoices() || [];
+      if (voices.length > 0) {
+        cachedKoreanVoice =
+          voices.find(v => /^ko[-_]KR/i.test(v.lang)) ||
+          voices.find(v => /^ko/i.test(v.lang)) ||
+          null;
+      }
+    } catch (_) {}
+  }
 
   function ensureAudioContext() {
     if (!audioCtx) {
       const Ctx = window.AudioContext || window.webkitAudioContext;
-      if (Ctx) audioCtx = new Ctx();
+      if (Ctx) {
+        try {
+          audioCtx = new Ctx();
+        } catch (_) {}
+      }
     }
-    if (audioCtx && audioCtx.state === 'suspended') {
+    // iOS Safari는 화면 잠금·전화·백그라운드 복귀 후 state가 'interrupted'가 될 수 있음
+    if (audioCtx && (audioCtx.state === 'suspended' || audioCtx.state === 'interrupted')) {
       audioCtx.resume().catch(() => {});
     }
+  }
+
+  function unlockAudioOnUserGesture() {
+    try {
+      ensureAudioContext();
+      if (audioCtx && !audioUnlockedOnce) {
+        const buffer = audioCtx.createBuffer(1, 1, 22050);
+        const source = audioCtx.createBufferSource();
+        source.buffer = buffer;
+        source.connect(audioCtx.destination);
+        if (typeof source.start === 'function') source.start(0);
+        audioUnlockedOnce = true;
+      }
+      if (!cachedKoreanVoice) {
+        refreshKoreanSpeechVoice();
+      }
+    } catch (_) {}
   }
 
   function playChimeSound(type = 'chime') {
@@ -948,42 +985,69 @@
       ensureAudioContext();
       if (!audioCtx) return;
 
-      const now = audioCtx.currentTime;
-      const notes =
-        type === 'fanfare'
-          ? [523.25, 659.25, 783.99, 1046.5]
-          : type === 'alarm'
-          ? [587.33, 880, 587.33, 880]
-          : [523.25, 659.25, 783.99];
+      const scheduleNotes = () => {
+        const now = audioCtx.currentTime;
+        const notes =
+          type === 'fanfare'
+            ? [523.25, 659.25, 783.99, 1046.5]
+            : type === 'alarm'
+            ? [587.33, 880, 587.33, 880]
+            : [523.25, 659.25, 783.99];
 
-      notes.forEach((freq, idx) => {
-        const osc = audioCtx.createOscillator();
-        const gain = audioCtx.createGain();
-        osc.type = 'sine';
-        osc.frequency.setValueAtTime(freq, now + idx * 0.14);
+        notes.forEach((freq, idx) => {
+          const osc = audioCtx.createOscillator();
+          const gain = audioCtx.createGain();
+          osc.type = 'sine';
+          osc.frequency.setValueAtTime(freq, now + idx * 0.14);
 
-        gain.gain.setValueAtTime(0.001, now + idx * 0.14);
-        gain.gain.exponentialRampToValueAtTime(0.22, now + idx * 0.14 + 0.03);
-        gain.gain.exponentialRampToValueAtTime(0.001, now + idx * 0.14 + 0.42);
+          gain.gain.setValueAtTime(0.001, now + idx * 0.14);
+          gain.gain.exponentialRampToValueAtTime(0.22, now + idx * 0.14 + 0.03);
+          gain.gain.exponentialRampToValueAtTime(0.001, now + idx * 0.14 + 0.42);
 
-        osc.connect(gain);
-        gain.connect(audioCtx.destination);
-        osc.start(now + idx * 0.14);
-        osc.stop(now + idx * 0.14 + 0.45);
-      });
+          osc.connect(gain);
+          gain.connect(audioCtx.destination);
+          osc.start(now + idx * 0.14);
+          osc.stop(now + idx * 0.14 + 0.45);
+        });
+      };
+
+      if (audioCtx.state === 'suspended' || audioCtx.state === 'interrupted') {
+        audioCtx.resume().then(scheduleNotes).catch(() => {});
+      } else {
+        scheduleNotes();
+      }
     } catch (_) {}
   }
 
   function speakKorean(text) {
     if (!state.settings.ttsEnabled) return;
-    if (!('speechSynthesis' in window)) return;
+    if (!('speechSynthesis' in window) || typeof SpeechSynthesisUtterance === 'undefined') return;
     try {
+      if (!cachedKoreanVoice) refreshKoreanSpeechVoice();
+      if (window.speechSynthesis.paused) {
+        window.speechSynthesis.resume();
+      }
       window.speechSynthesis.cancel();
       const utter = new SpeechSynthesisUtterance(text);
       utter.lang = 'ko-KR';
-      utter.rate = 1.03;
+      if (cachedKoreanVoice) {
+        utter.voice = cachedKoreanVoice;
+      }
+      utter.rate = 1.02;
       utter.pitch = 1.0;
       window.speechSynthesis.speak(utter);
+    } catch (_) {}
+  }
+
+  function requestNotificationPermissionFromGesture() {
+    if (!('Notification' in window)) return;
+    try {
+      if (Notification.permission === 'default') {
+        const res = Notification.requestPermission();
+        if (res && typeof res.catch === 'function') {
+          res.catch(() => {});
+        }
+      }
     } catch (_) {}
   }
 
@@ -991,17 +1055,27 @@
     if (!('Notification' in window)) return;
     if (Notification.permission === 'granted') {
       try {
-        new Notification(title, { body: bodyText, icon: 'favicon.svg' });
+        new Notification(title, { body: bodyText, icon: 'icon-192.png' });
       } catch (_) {}
-    } else if (Notification.permission !== 'denied') {
-      Notification.requestPermission().then(perm => {
-        if (perm === 'granted') {
-          try {
-            new Notification(title, { body: bodyText, icon: 'favicon.svg' });
-          } catch (_) {}
-        }
-      }).catch(() => {});
     }
+  }
+
+  function triggerSafeFileDownload(blob, filename) {
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = filename;
+    a.rel = 'noopener';
+    a.style.display = 'none';
+    document.body.appendChild(a);
+    a.click();
+    setTimeout(() => {
+      a.remove();
+    }, 250);
+    // iOS Safari 비동기 다운로드 완료 전 URL 조기 해제 방지
+    setTimeout(() => {
+      URL.revokeObjectURL(url);
+    }, 15000);
   }
 
   async function requestWakeLock() {
@@ -5409,7 +5483,17 @@
     }
 
     const url = `https://calendar.google.com/calendar/render?${params.toString()}`;
-    window.open(url, '_blank', 'noopener,noreferrer');
+    const opened = window.open(url, '_blank', 'noopener,noreferrer');
+    if (!opened) {
+      const link = document.createElement('a');
+      link.href = url;
+      link.target = '_blank';
+      link.rel = 'noopener noreferrer';
+      link.style.display = 'none';
+      document.body.appendChild(link);
+      link.click();
+      link.remove();
+    }
     showToast('구글 캘린더 일정 등록 화면을 새 창으로 열었습니다.');
   }
 
@@ -5530,13 +5614,8 @@
 
     const icsContent = lines.join('\r\n');
     const blob = new Blob([icsContent], { type: 'text/calendar;charset=utf-8' });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement('a');
-    a.href = url;
     const tagSuffix = selectedProjectTag && selectedProjectTag !== '__UNTAGGED__' ? `_${selectedProjectTag}` : '';
-    a.download = `timeflow_calendar${tagSuffix}_${getTodayStr()}.ics`;
-    a.click();
-    URL.revokeObjectURL(url);
+    triggerSafeFileDownload(blob, `timeflow_calendar${tagSuffix}_${getTodayStr()}.ics`);
 
     const statusEl = document.getElementById('icsSyncStatusText');
     if (statusEl) {
@@ -6128,6 +6207,8 @@
 
     // 알람 즉시 테스트 버튼
     document.getElementById('testAlarmBtn').addEventListener('click', () => {
+      unlockAudioOnUserGesture();
+      requestNotificationPermissionFromGesture();
       triggerAlarmModal({
         type: 'schedule',
         title: '알람 사운드 및 한국어 음성 안내 테스트',
@@ -6135,6 +6216,13 @@
         categoryId: state.categories[0].id,
         refId: ''
       });
+    });
+
+    document.getElementById('itemModalAlarm')?.addEventListener('change', e => {
+      if (e.target.checked) requestNotificationPermissionFromGesture();
+    });
+    document.getElementById('routineModalAlarm')?.addEventListener('change', e => {
+      if (e.target.checked) requestNotificationPermissionFromGesture();
     });
 
     // 초고속 입력 바 실시간 프리뷰 & 제출
@@ -6794,12 +6882,7 @@
 
     document.getElementById('exportJsonBtn').addEventListener('click', () => {
       const blob = new Blob([JSON.stringify(state, null, 2)], { type: 'application/json' });
-      const url = URL.createObjectURL(blob);
-      const a = document.createElement('a');
-      a.href = url;
-      a.download = `timeflow_backup_${getTodayStr()}.json`;
-      a.click();
-      URL.revokeObjectURL(url);
+      triggerSafeFileDownload(blob, `timeflow_backup_${getTodayStr()}.json`);
       showToast('백업 파일이 다운로드되었습니다.');
     });
 
@@ -6892,6 +6975,16 @@
   // -------------------- 초기화 실행 --------------------
   function init() {
     applyThemeUI();
+    refreshKoreanSpeechVoice();
+    if ('speechSynthesis' in window && typeof window.speechSynthesis.addEventListener === 'function') {
+      window.speechSynthesis.addEventListener('voiceschanged', refreshKoreanSpeechVoice);
+    }
+
+    // iOS Safari 오디오 컨텍스트 잠금 해제 및 인터럽트 자동 복구
+    ['touchstart', 'touchend', 'click', 'keydown'].forEach(evtName => {
+      document.addEventListener(evtName, unlockAudioOnUserGesture, { passive: true });
+    });
+
     bindEvents();
     renderAll();
     checkScheduledAlarms();

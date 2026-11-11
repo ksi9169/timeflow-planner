@@ -44,7 +44,10 @@ body {
   color: var(--text-main);
   line-height: 1.5;
   min-height: 100vh;
+  min-height: 100dvh;
   -webkit-font-smoothing: antialiased;
+  -webkit-text-size-adjust: 100%;
+  -webkit-tap-highlight-color: transparent;
 }
 
 button, input, select, textarea {
@@ -63,7 +66,7 @@ button, input, select, textarea {
   z-index: 120;
   background: linear-gradient(90deg, #1E1B4B 0%, #312E81 50%, #0F766E 100%);
   color: #FFFFFF;
-  padding: 10px 24px;
+  padding: calc(10px + env(safe-area-inset-top, 0px)) 24px 10px;
   display: flex;
   align-items: center;
   justify-content: space-between;
@@ -139,12 +142,16 @@ button, input, select, textarea {
 .app-header {
   background: var(--bg-card);
   border-bottom: 1px solid var(--border-color);
-  padding: 12px 24px;
+  padding: calc(12px + env(safe-area-inset-top, 0px)) 24px 12px;
   display: flex;
   align-items: center;
   justify-content: space-between;
   gap: 16px;
   flex-wrap: wrap;
+}
+
+.active-timer-banner:not(.hidden) + .app-header {
+  padding-top: 12px;
 }
 
 .brand-area {
@@ -2396,11 +2403,12 @@ button:disabled {
   inset: 0;
   z-index: 200;
   background: rgba(15, 23, 42, 0.55);
+  -webkit-backdrop-filter: blur(3px);
   backdrop-filter: blur(3px);
   display: flex;
   align-items: center;
   justify-content: center;
-  padding: 16px;
+  padding: calc(14px + env(safe-area-inset-top, 0px)) 16px calc(14px + env(safe-area-inset-bottom, 0px));
 }
 
 .modal-box {
@@ -2411,7 +2419,10 @@ button:disabled {
   padding: 22px;
   box-shadow: var(--shadow-lg);
   max-height: 90vh;
+  max-height: min(90vh, calc(100dvh - 28px));
   overflow-y: auto;
+  -webkit-overflow-scrolling: touch;
+  overscroll-behavior: contain;
 }
 
 .modal-box-wide {
@@ -2475,6 +2486,8 @@ button:disabled {
 .form-row input[type="number"],
 .form-row select {
   width: 100%;
+  min-width: 0;
+  max-width: 100%;
   padding: 9px 11px;
   border-radius: var(--radius-sm);
   border: 1px solid var(--border-strong);
@@ -2651,9 +2664,23 @@ button:disabled {
 }
 
 .file-upload-label {
+  position: relative;
   display: inline-flex;
   align-items: center;
   cursor: pointer;
+}
+
+.visually-hidden-file {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border: 0;
+  opacity: 0;
 }
 
 .empty-guide {
@@ -3461,11 +3488,71 @@ button:disabled {
     padding: 6px 10px;
     font-size: 0.76rem;
   }
+
+  /* iOS Safari 입력창 포커스 시 강제 화면 확대 방지 (16px 이상 보장) */
+  input:not([type="checkbox"]):not([type="radio"]):not([type="color"]),
+  select,
+  textarea {
+    font-size: 16px !important;
+  }
+}
+
+@supports (-webkit-touch-callout: none) {
+  input:not([type="checkbox"]):not([type="radio"]):not([type="color"]),
+  select,
+  textarea {
+    font-size: 16px;
+  }
+  .dual-timeline-scroll,
+  .week-timetable-wrap,
+  .global-search-results,
+  .step-queue-list {
+    -webkit-overflow-scrolling: touch;
+  }
+}
+
+@media (hover: none) and (pointer: coarse) {
+  .timeline-block,
+  .wk-tt-chip,
+  .wk-item-card,
+  .todo-item-card,
+  .mc-item-pill,
+  .tb-resize-handle,
+  button {
+    -webkit-touch-callout: none;
+    -webkit-user-select: none;
+    user-select: none;
+  }
+
+  .tb-resize-handle {
+    height: 14px;
+  }
+
+  .tb-resize-handle::after {
+    width: 36px;
+    height: 4px;
+    background: rgba(99, 102, 241, 0.42);
+  }
+
+  .dt-empty-hint {
+    opacity: 0.55;
+    font-size: 0.68rem;
+  }
+
+  .mc-quick-add-btn {
+    opacity: 1;
+  }
 }
 
 @media (max-width: 680px) {
+  .active-timer-banner {
+    padding: calc(8px + env(safe-area-inset-top, 0px)) 14px 8px;
+  }
   .app-header {
-    padding: 12px 14px;
+    padding: calc(12px + env(safe-area-inset-top, 0px)) 14px 12px;
+  }
+  .active-timer-banner:not(.hidden) + .app-header {
+    padding-top: 12px;
   }
   .main-container, .quick-input-bar {
     padding: 0 12px;
@@ -3475,6 +3562,28 @@ button:disabled {
   }
   .donut-and-legend {
     grid-template-columns: 1fr;
+  }
+  .dual-timeline-header,
+  .dt-hour-row {
+    grid-template-columns: 46px minmax(0, 1fr) minmax(0, 1fr);
+  }
+  .dual-timeline-header.single-col,
+  .dt-hour-row.single-col {
+    grid-template-columns: 46px minmax(0, 1fr);
+  }
+  .timeline-block {
+    flex-direction: column;
+    align-items: stretch;
+    gap: 5px;
+    padding: 6px 8px 14px;
+  }
+  .tb-title {
+    white-space: normal;
+    word-break: keep-all;
+    line-height: 1.3;
+  }
+  .tb-actions {
+    justify-content: flex-start;
   }
   .week-matrix-grid,
   .dash-week-grid {

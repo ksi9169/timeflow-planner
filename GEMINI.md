@@ -11,6 +11,11 @@
   - Database & Keep-Alive: LocalStorage 즉시 저장 + Supabase(`public.escape_rooms` 테이블 `TIMEFLOW:<동기화코드>` 실시간 클라우드 동기화) + 3일 주기 이중 잠김 방지(Cloudflare Cron `0 0 */3 * *` + [`.github/workflows/keep-alive.yml`](file:///g:/내%20드라이브/바이브%20코딩/일정관리/.github/workflows/keep-alive.yml))
 
 ## 2. 최근 완료된 작업 내역
+- **아이폰(iOS) · Safari 및 홈 화면 웹앱(PWA) 호환성 전면 점검 · 최적화 완료 (2026-11-11)**:
+  - **입력창 터치 시 Safari 강제 화면 확대 방지**: 모바일 및 WebKit 터치 환경(`@supports (-webkit-touch-callout: none)`)에서 모든 입력창·드롭다운·텍스트영역 글자 크기를 `16px` 이상으로 보장하고 날짜·시간 입력창 너비 넘침(`min-width: 0`)을 방지
+  - **iOS Web Audio 잠금 해제 · `interrupted` 상태 자동 복구 · 한국어 TTS 안정화**: 첫 터치 제스처 시 무음 버퍼로 오디오 컨텍스트를 즉시 활성화(`unlockAudioOnUserGesture`)하고, 아이폰 잠금화면·통화 복귀 시 발생하는 Safari 고유 `interrupted` 상태를 자동 재개하며 한국어 음성(`ko-KR`) 바인딩 및 `speechSynthesis.resume()` 보강
+  - **iOS Safari 파일 다운로드(`.ics` / `.json`) 및 파일 선택창 호환성 수정**: `URL.revokeObjectURL` 동기 즉시 호출로 인해 Safari 비동기 다운로드가 실패하던 문제를 지연 해제(`triggerSafeFileDownload`)로 해결하고, 파일 업로드 입력창을 `label[for]` + `.visually-hidden-file` 구조로 개선해 아이폰 파일 앱 선택 호환성 확보
+  - **아이폰 소형 화면 듀얼 타임라인 가독성 & 노치·다이내믹 아일랜드 안전 영역 마감**: `680px` 이하에서 타임블록을 세로 스택 구조로 전환해 2열 비교 보기에서도 일정 제목이 잘리지 않도록 개선하고, 상단 `env(safe-area-inset-top)`, 모달 `100dvh` 키보드 높이 대응, `-webkit-backdrop-filter`, 홈 화면 추가 메타 태그(`apple-mobile-web-app-capable`), 전화번호 오인식 방지(`format-detection`) 적용
 - **전면 심층 오류 점검 및 렌더링 · 백엔드 성능 최적화 완료 (2026-11-11)**:
   - **한국어 자연어 입력 파서(`parseNaturalQuickInput`) 정규식 및 시간 구간 파싱 결함 수정**: JS `\b` 아스키 단어 경계로 인해 한글 `오늘`·`내일`·`모레`·단독 `요일` 키워드가 매칭되지 않던 문제를 유니코드 안전 경계로 해결하고, `오후 2시~4시` 한글 시간 구간 및 `30분`/`1시간 30분` 소요 시간 파싱, 심야 `23:55~23:59` 시간 역전 방지 보강
   - **`태그 미지정` 필터 상태 오염 차단 및 AI 일정 재배치(`handleAiRescheduleDay`) 안전성 강화**: `태그 미지정`(`__UNTAGGED__`) 보기 중 새 항목 추가 시 `@__UNTAGGED__` 문자열이 저장되던 버그를 `getActiveRealProjectTag()`로 원천 차단하고, AI 일정 재배치 시 정기 반복 일정(`repeat !== 'none'`)을 고정 구간으로 보호하며 `실행 취소` 스냅샷과 프로젝트 태그 보존 적용
