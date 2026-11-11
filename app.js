@@ -216,17 +216,62 @@
     return baseDate || startRef;
   }
 
+  function doesRoutineOccurOnDate(rtn, targetDateStr) {
+    if (!rtn || !targetDateStr) return false;
+    if (!Array.isArray(rtn.activeDays) || rtn.activeDays.length === 0 || rtn.activeDays.length === 7) {
+      return true;
+    }
+    const [ty, tm, td] = targetDateStr.split('-').map(Number);
+    if (!ty || !tm || !td) return true;
+    const dow = new Date(ty, tm - 1, td).getDay();
+    return rtn.activeDays.map(Number).includes(dow);
+  }
+
+  function getRoutineDaysLabelKo(rtn) {
+    if (!rtn || !Array.isArray(rtn.activeDays) || rtn.activeDays.length === 0 || rtn.activeDays.length === 7) {
+      return '매일';
+    }
+    const sorted = [...new Set(rtn.activeDays.map(Number))].sort((a, b) => a - b);
+    const joined = sorted.join(',');
+    if (joined === '1,2,3,4,5') return '평일';
+    if (joined === '0,6') return '주말';
+    const dayNames = ['일', '월', '화', '수', '목', '금', '토'];
+    return `${sorted.map(d => dayNames[d]).join('·')}요일`;
+  }
+
   // -------------------- 초기 기본 상태 생성 --------------------
+  const SAMPLE_ITEM_IDS = new Set([
+    'sch_1', 'sch_2', 'sch_3', 'sch_4', 'sch_5', 'sch_6', 'sch_7', 'sch_8', 'sch_9', 'sch_10', 'sch_wk_meeting',
+    'act_1', 'act_2', 'act_3', 'act_y1', 'act_y2',
+    'todo_1', 'todo_2', 'todo_3', 'todo_4', 'todo_5', 'todo_6', 'todo_7', 'todo_wk_notice', 'todo_wk_sync'
+  ]);
+
+  const SAMPLE_REPORT_TITLES = new Set([
+    '주간 핵심 프로젝트 개발',
+    '직무 역량 강의 수강 및 요약',
+    '근력 및 코어 운동',
+    '기획서 작성 및 데이터 정리',
+    '모닝 개운 루틴 완주',
+    '저녁 독서 및 회고',
+    '팀 협업 미팅 및 피드백 반영',
+    '러닝 5km 및 스트레칭',
+    '집중 코딩 및 사이드 프로젝트',
+    '충전 및 영화 감상'
+  ]);
+
   function createInitialState() {
     const today = getTodayStr();
     const tomorrow = addDaysStr(today, 1);
     const yesterday = addDaysStr(today, -1);
 
     return {
+      updatedAt: '',
       settings: {
         ttsEnabled: true,
         syncCode: '',
-        streakDays: 3,
+        autoSync: true,
+        darkMode: false,
+        streakDays: 1,
         weeklyMonthlySeeded: true,
         projectTagSeeded: true
       },
@@ -547,6 +592,8 @@
           categoryId: 'cat_routine',
           startTime: '07:00',
           alarm: true,
+          alarmLeadMinutes: 0,
+          activeDays: [0, 1, 2, 3, 4, 5, 6],
           completedDates: [yesterday],
           steps: [
             { id: 'st_1', title: '이불 정리 및 창문 열어 환기', minutes: 2, tip: '일어나자마자 이불을 펴면 다시 눕고 싶은 유혹이 사라집니다.' },
@@ -561,6 +608,8 @@
           categoryId: 'cat_work',
           startTime: '09:00',
           alarm: true,
+          alarmLeadMinutes: 0,
+          activeDays: [1, 2, 3, 4, 5],
           completedDates: [],
           steps: [
             { id: 'st_d1', title: '책상 위 불필요한 물건 치우기', minutes: 2, tip: '시야를 깔끔하게 비우면 집중력이 즉시 올라갑니다.' },
@@ -575,6 +624,8 @@
           categoryId: 'cat_rest',
           startTime: '22:30',
           alarm: true,
+          alarmLeadMinutes: 0,
+          activeDays: [0, 1, 2, 3, 4, 5, 6],
           completedDates: [],
           steps: [
             { id: 'st_n1', title: '오늘 타임트래커 빈칸 기록 마무리', minutes: 3, tip: '오늘 하루 실제로 사용한 시간을 가볍게 돌아봅니다.' },
@@ -605,6 +656,7 @@
   }
 
   // -------------------- 전역 런타임 상태 --------------------
+  const FIRED_ALARM_STORAGE_KEY = 'TIMEFLOW_FIRED_ALARMS_V1';
   let state = loadState();
   let selectedDate = getTodayStr();
   let miniCalCursor = new Date();
@@ -628,6 +680,12 @@
   let currentReportPeriod = 'thisMonth';
   let selectedProjectTag = '';
   let todoGroupByTag = true;
+  let currentSearchTypeFilter = 'all';
+
+  // 실행 취소 히스토리 스택 & 자동 동기화 타이머
+  const undoStack = [];
+  let autoSyncTimerId = null;
+  let lastAutoCloudPullAt = 0;
 
   // 실시간 타임트래커 스톱워치 상태
   let liveTracker = {
@@ -641,7 +699,7 @@
     intervalId: null
   };
 
-  // 루티너리 플레이어 상태
+  // 루티너리 플레이어 상태 (Date.now() 월클락 타임스탬프 기반)
   let routinePlayer = {
     activeRoutineId: null,
     running: false,
@@ -650,16 +708,119 @@
     stepTargetSeconds: 0,
     stepElapsedSeconds: 0,
     totalElapsedSeconds: 0,
+    stepStartTimestamp: 0,
+    stepBaseElapsedMs: 0,
+    totalStartTimestamp: 0,
+    totalBaseElapsedMs: 0,
     routineStartTimeStr: '',
     overtimeNotified: false,
     intervalId: null
   };
 
   // 알람 엔진 상태
-  let triggeredAlarmKeys = new Set();
+  let triggeredAlarmKeys = loadTriggeredAlarmKeys();
   let activeAlarmItem = null;
   let alarmRepeatIntervalId = null;
   let wakeLockSentinel = null;
+
+  function loadTriggeredAlarmKeys() {
+    const todayStr = getTodayStr();
+    try {
+      const raw = sessionStorage.getItem(FIRED_ALARM_STORAGE_KEY);
+      if (!raw) return new Set();
+      const parsed = JSON.parse(raw);
+      if (parsed && parsed.date === todayStr && Array.isArray(parsed.keys)) {
+        return new Set(parsed.keys);
+      }
+    } catch (_) {}
+    return new Set();
+  }
+
+  function markAlarmKeyTriggered(key) {
+    const todayStr = getTodayStr();
+    // 날짜가 바뀌었으면 이전 키 정리
+    for (const existing of Array.from(triggeredAlarmKeys)) {
+      if (!existing.includes(todayStr)) {
+        triggeredAlarmKeys.delete(existing);
+      }
+    }
+    triggeredAlarmKeys.add(key);
+    try {
+      sessionStorage.setItem(
+        FIRED_ALARM_STORAGE_KEY,
+        JSON.stringify({ date: todayStr, keys: Array.from(triggeredAlarmKeys) })
+      );
+    } catch (_) {}
+  }
+
+  function computeRoutineStreakDays() {
+    const completedSet = new Set();
+    if (Array.isArray(state.routines)) {
+      state.routines.forEach(r => {
+        if (Array.isArray(r.completedDates)) {
+          r.completedDates.forEach(d => {
+            if (d) completedSet.add(d);
+          });
+        }
+      });
+    }
+    if (completedSet.size === 0) return 0;
+
+    const today = getTodayStr();
+    const yesterday = addDaysStr(today, -1);
+    let cursor = '';
+    if (completedSet.has(today)) {
+      cursor = today;
+    } else if (completedSet.has(yesterday)) {
+      cursor = yesterday;
+    } else {
+      return 0;
+    }
+
+    let streak = 0;
+    while (completedSet.has(cursor) && streak < 3650) {
+      streak += 1;
+      cursor = addDaysStr(cursor, -1);
+    }
+    return streak;
+  }
+
+  function pushUndoSnapshot(actionLabel = '') {
+    try {
+      const snapshot = JSON.stringify({
+        schedules: state.schedules,
+        actualLogs: state.actualLogs,
+        todos: state.todos,
+        routines: state.routines,
+        categories: state.categories,
+        monthlyGoals: state.monthlyGoals
+      });
+      undoStack.push({ label: actionLabel, snapshot });
+      if (undoStack.length > 15) {
+        undoStack.shift();
+      }
+    } catch (_) {}
+  }
+
+  function performUndo() {
+    if (undoStack.length === 0) {
+      showToast('실행 취소할 이전 작업이 없습니다.');
+      return;
+    }
+    try {
+      const last = undoStack.pop();
+      const restored = JSON.parse(last.snapshot);
+      state.schedules = restored.schedules || [];
+      state.actualLogs = restored.actualLogs || [];
+      state.todos = restored.todos || [];
+      state.routines = restored.routines || [];
+      state.categories = restored.categories || state.categories;
+      state.monthlyGoals = restored.monthlyGoals || [];
+      saveState();
+      renderAll();
+      showToast('방금 수행한 변경 사항을 이전 상태로 복구했습니다.');
+    } catch (_) {}
+  }
 
   // -------------------- 저장소 입출력 --------------------
   function loadState() {
@@ -721,10 +882,17 @@
     }
   }
 
-  function saveState() {
+  function saveState(options = {}) {
+    const { skipAutoSync = false, touchTimestamp = true } = options;
+    if (touchTimestamp) {
+      state.updatedAt = new Date().toISOString();
+    }
     try {
       localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
     } catch (_) {}
+    if (!skipAutoSync) {
+      scheduleAutoCloudSave();
+    }
   }
 
   function getCategoryById(catId) {
@@ -824,17 +992,41 @@
     }
   }
 
-  // -------------------- 토스트 메시지 --------------------
-  function showToast(message) {
+  // -------------------- 토스트 메시지 및 실행 취소 --------------------
+  function showToast(message, options = {}) {
     const container = document.getElementById('toastContainer');
     if (!container) return;
+    const { withUndo = false, onUndo = null, durationMs } = options || {};
+    const hasUndoAction = Boolean(withUndo && undoStack.length > 0) || typeof onUndo === 'function';
+
     const item = document.createElement('div');
     item.className = 'toast-item';
-    item.textContent = message;
+
+    const textSpan = document.createElement('span');
+    textSpan.textContent = message;
+    item.appendChild(textSpan);
+
+    if (hasUndoAction) {
+      const undoBtn = document.createElement('button');
+      undoBtn.type = 'button';
+      undoBtn.className = 'toast-undo-btn';
+      undoBtn.textContent = '실행 취소';
+      undoBtn.addEventListener('click', () => {
+        item.remove();
+        if (typeof onUndo === 'function') {
+          onUndo();
+        } else {
+          performUndo();
+        }
+      });
+      item.appendChild(undoBtn);
+    }
+
     container.appendChild(item);
+    const timeout = durationMs || (hasUndoAction ? 6200 : 3400);
     setTimeout(() => {
       item.remove();
-    }, 3400);
+    }, timeout);
   }
 
   // -------------------- 자연어 빠른 입력 파서 --------------------
@@ -1123,6 +1315,8 @@
     renderCalendarOverviewTab();
     renderReportAndGoalsTab();
     updateTtsButtonUI();
+    applyThemeUI();
+    updateSyncHeaderUI();
   }
 
   function renderHeaderDate() {
@@ -1198,15 +1392,25 @@
     document.getElementById('kpiActualVsPlan').textContent = `계획 ${formatDurationKo(planMins)}`;
     document.getElementById('kpiActualBar').style.width = `${actualRatio}%`;
 
-    // 루틴 완료 현황
-    const totalRoutines = state.routines.length;
-    const doneRoutines = state.routines.filter(r => Array.isArray(r.completedDates) && r.completedDates.includes(selectedDate)).length;
+    // 루틴 완료 현황 (실천 요일 반영 및 실제 연속 완주 일수 집계)
+    const activeDayRoutines = state.routines.filter(r => doesRoutineOccurOnDate(r, selectedDate));
+    const totalRoutines = activeDayRoutines.length;
+    const doneRoutines = activeDayRoutines.filter(
+      r => Array.isArray(r.completedDates) && r.completedDates.includes(selectedDate)
+    ).length;
     const routinePct = totalRoutines > 0 ? Math.round((doneRoutines / totalRoutines) * 100) : 0;
+    const streakDays = computeRoutineStreakDays();
+    state.settings.streakDays = streakDays;
     document.getElementById('kpiRoutineCount').textContent = `${doneRoutines} / ${totalRoutines}`;
     document.getElementById('kpiRoutineBar').style.width = `${routinePct}%`;
-    document.getElementById('kpiStreakBadge').textContent = `연속 ${state.settings.streakDays || 1}일`;
-    const nextRoutine = state.routines.find(r => !r.completedDates?.includes(selectedDate));
-    document.getElementById('kpiRoutineNext').textContent = nextRoutine ? `다음: ${nextRoutine.name}` : '오늘 루틴 모두 완주!';
+    document.getElementById('kpiStreakBadge').textContent = streakDays > 0 ? `연속 ${streakDays}일` : '오늘 시작';
+    const nextRoutine = activeDayRoutines.find(r => !r.completedDates?.includes(selectedDate));
+    document.getElementById('kpiRoutineNext').textContent =
+      totalRoutines === 0
+        ? '오늘 예정된 요일 루틴 없음'
+        : nextRoutine
+        ? `다음: ${nextRoutine.name}`
+        : '오늘 루틴 모두 완주!';
 
     // 다음 예정 알람 계산
     const nowMins = timeToMinutes(getNowTimeStr());
@@ -1214,7 +1418,7 @@
       ...daySchedules
         .filter(s => s.alarm && !isItemCompletedOnDate(s, selectedDate) && timeToMinutes(s.startTime) >= nowMins)
         .map(s => ({ time: s.startTime, title: s.title })),
-      ...state.routines
+      ...activeDayRoutines
         .filter(r => r.alarm && !r.completedDates?.includes(selectedDate) && timeToMinutes(r.startTime) >= nowMins)
         .map(r => ({ time: r.startTime, title: r.name }))
     ].sort((a, b) => timeToMinutes(a.time) - timeToMinutes(b.time));
@@ -1307,10 +1511,29 @@
     const curDur = durationMinutes(item.startTime, item.endTime);
     const nextDur = Math.max(15, Math.min(23 * 60 + 59 - startMins, curDur + deltaMins));
     if (nextDur === curDur) return;
+    pushUndoSnapshot('소요 시간 조절');
     item.endTime = minutesToTime(startMins + nextDur);
     saveState();
     renderAll();
-    showToast(`'${item.title}' 소요 시간이 ${item.startTime}~${item.endTime} · ${formatDurationKo(nextDur)}으로 변경되었습니다.`);
+    showToast(
+      `'${item.title}' 소요 시간이 ${item.startTime}~${item.endTime} · ${formatDurationKo(nextDur)}으로 변경되었습니다.`,
+      { withUndo: true }
+    );
+  }
+
+  function shiftItemStartTime(item, deltaMins) {
+    if (!item || !item.startTime || !item.endTime) return;
+    const curStart = timeToMinutes(item.startTime);
+    const curDur = durationMinutes(item.startTime, item.endTime);
+    const maxStart = Math.max(0, 23 * 60 + 59 - curDur);
+    const nextStart = Math.max(0, Math.min(maxStart, curStart + deltaMins));
+    if (nextStart === curStart) return;
+    pushUndoSnapshot('시작 시각 이동');
+    item.startTime = minutesToTime(nextStart);
+    item.endTime = minutesToTime(Math.min(23 * 60 + 59, nextStart + curDur));
+    saveState();
+    renderAll();
+    showToast(`'${item.title}' 시간이 ${item.startTime}~${item.endTime}으로 이동되었습니다.`, { withUndo: true });
   }
 
   function makeItemDraggable(el, itemType, item, sourceDate) {
@@ -1391,6 +1614,7 @@
         const newStart = minutesToTime(startMins);
         const newEnd = minutesToTime(endMins);
 
+        pushUndoSnapshot('일정 실제 기록 전환');
         setItemCompletedOnDate(sch, destDate, true);
         state.actualLogs.push({
           id: uid('act'),
@@ -1403,30 +1627,30 @@
         });
         saveState();
         renderAll();
-        showToast(`'${sch.title}' 일정이 ${newStart}~${newEnd} 실제 진행 기록으로 반영되었습니다.`);
+        showToast(`'${sch.title}' 일정이 ${newStart}~${newEnd} 실제 진행 기록으로 반영되었습니다.`, { withUndo: true });
         return;
       }
 
-      let changed = false;
-      if (destDate && sch.date !== destDate) {
-        sch.date = destDate;
-        changed = true;
-      }
+      const nextDate = destDate && sch.date !== destDate ? destDate : sch.date;
+      let nextStart = sch.startTime;
+      let nextEnd = sch.endTime;
       if (typeof targetHour === 'number') {
         const nextStartMins = Math.min(23 * 60 + 45, targetHour * 60 + origMinuteOffset);
         const nextEndMins = Math.min(23 * 60 + 59, nextStartMins + origDur);
-        const nextStart = minutesToTime(nextStartMins);
-        const nextEnd = minutesToTime(nextEndMins);
-        if (sch.startTime !== nextStart || sch.endTime !== nextEnd) {
-          sch.startTime = nextStart;
-          sch.endTime = nextEnd;
-          changed = true;
-        }
+        nextStart = minutesToTime(nextStartMins);
+        nextEnd = minutesToTime(nextEndMins);
       }
-      if (changed) {
+      if (nextDate !== sch.date || nextStart !== sch.startTime || nextEnd !== sch.endTime) {
+        pushUndoSnapshot('일정 이동');
+        sch.date = nextDate;
+        sch.startTime = nextStart;
+        sch.endTime = nextEnd;
         saveState();
         renderAll();
-        showToast(`'${sch.title}' 일정이 ${sch.date === selectedDate ? '' : sch.date + ' '}${sch.startTime}~${sch.endTime}으로 이동되었습니다.`);
+        showToast(
+          `'${sch.title}' 일정이 ${sch.date === selectedDate ? '' : sch.date + ' '}${sch.startTime}~${sch.endTime}으로 이동되었습니다.`,
+          { withUndo: true }
+        );
       }
     } else if (itemType === 'actual') {
       const act = state.actualLogs.find(a => a.id === itemId);
@@ -1434,26 +1658,26 @@
       const origDur = durationMinutes(act.startTime, act.endTime);
       const origMinuteOffset = timeToMinutes(act.startTime) % 60;
 
-      let changed = false;
-      if (destDate && act.date !== destDate) {
-        act.date = destDate;
-        changed = true;
-      }
+      const nextDate = destDate && act.date !== destDate ? destDate : act.date;
+      let nextStart = act.startTime;
+      let nextEnd = act.endTime;
       if (typeof targetHour === 'number') {
         const nextStartMins = Math.min(23 * 60 + 45, targetHour * 60 + origMinuteOffset);
         const nextEndMins = Math.min(23 * 60 + 59, nextStartMins + origDur);
-        const nextStart = minutesToTime(nextStartMins);
-        const nextEnd = minutesToTime(nextEndMins);
-        if (act.startTime !== nextStart || act.endTime !== nextEnd) {
-          act.startTime = nextStart;
-          act.endTime = nextEnd;
-          changed = true;
-        }
+        nextStart = minutesToTime(nextStartMins);
+        nextEnd = minutesToTime(nextEndMins);
       }
-      if (changed) {
+      if (nextDate !== act.date || nextStart !== act.startTime || nextEnd !== act.endTime) {
+        pushUndoSnapshot('실제 기록 이동');
+        act.date = nextDate;
+        act.startTime = nextStart;
+        act.endTime = nextEnd;
         saveState();
         renderAll();
-        showToast(`'${act.title}' 기록이 ${act.date === selectedDate ? '' : act.date + ' '}${act.startTime}~${act.endTime}으로 이동되었습니다.`);
+        showToast(
+          `'${act.title}' 기록이 ${act.date === selectedDate ? '' : act.date + ' '}${act.startTime}~${act.endTime}으로 이동되었습니다.`,
+          { withUndo: true }
+        );
       }
     } else if (itemType === 'todo') {
       const todo = state.todos.find(t => t.id === itemId);
@@ -1466,6 +1690,7 @@
         const newStart = minutesToTime(startMins);
         const newEnd = minutesToTime(endMins);
 
+        pushUndoSnapshot('할 일 타임라인 배치');
         if (targetType === 'actual') {
           state.actualLogs.push({
             id: uid('act'),
@@ -1479,7 +1704,7 @@
           setItemCompletedOnDate(todo, destDate, true);
           saveState();
           renderAll();
-          showToast(`'${todo.title}' 할 일이 ${newStart}~${newEnd} 실제 진행 기록으로 등록되었습니다.`);
+          showToast(`'${todo.title}' 할 일이 ${newStart}~${newEnd} 실제 진행 기록으로 등록되었습니다.`, { withUndo: true });
         } else {
           state.schedules.push({
             id: uid('sch'),
@@ -1492,22 +1717,24 @@
             repeat: 'none',
             completedDates: [],
             alarm: true,
+            alarmLeadMinutes: 0,
             important: Boolean(todo.important),
             completed: false
           });
           if (!todo.dueDate) todo.dueDate = destDate;
           saveState();
           renderAll();
-          showToast(`'${todo.title}' 할 일이 ${newStart}~${newEnd} 계획 일정으로 배치되었습니다.`);
+          showToast(`'${todo.title}' 할 일이 ${newStart}~${newEnd} 계획 일정으로 배치되었습니다.`, { withUndo: true });
         }
         return;
       }
 
       if (destDate && todo.dueDate !== destDate) {
+        pushUndoSnapshot('할 일 마감일 변경');
         todo.dueDate = destDate;
         saveState();
         renderAll();
-        showToast(`'${todo.title}' 마감 날짜가 ${destDate}로 변경되었습니다.`);
+        showToast(`'${todo.title}' 마감 날짜가 ${destDate}로 변경되었습니다.`, { withUndo: true });
       }
     }
   }
@@ -1564,10 +1791,14 @@
         lastDragOrResizeAt = Date.now();
 
         if (nextEndStr !== item.endTime) {
+          pushUndoSnapshot('드래그 시간 조절');
           item.endTime = nextEndStr;
           saveState();
           renderAll();
-          showToast(`'${item.title}' 소요 시간이 ${item.startTime}~${item.endTime} · ${formatDurationKo(nextDur)}으로 변경되었습니다.`);
+          showToast(
+            `'${item.title}' 소요 시간이 ${item.startTime}~${item.endTime} · ${formatDurationKo(nextDur)}으로 변경되었습니다.`,
+            { withUndo: true }
+          );
         }
       };
 
@@ -1998,6 +2229,8 @@
                 <span class="tb-title">${escapeHtml(p.title)}</span>
               </div>
               <div class="tb-actions">
+                <button type="button" class="tb-mini-btn tb-step-btn plan-up-btn" title="시작 시각 30분 앞당기기">▲30분</button>
+                <button type="button" class="tb-mini-btn tb-step-btn plan-down-btn" title="시작 시각 30분 늦추기">▼30분</button>
                 <button type="button" class="tb-mini-btn tb-step-btn plan-minus-btn" title="소요 시간 15분 줄이기">-15분</button>
                 <button type="button" class="tb-mini-btn tb-step-btn plan-plus-btn" title="소요 시간 15분 늘리기">+15분</button>
                 <button type="button" class="tb-mini-btn plan-run-btn" title="이 일정을 지금 시작하고 실제 시간을 측정합니다">시작</button>
@@ -2007,6 +2240,14 @@
             block.addEventListener('click', e => {
               if (e.target.closest('button') || e.target.closest('.tb-resize-handle') || isJustDraggedOrResized()) return;
               openItemModalForEdit('schedule', p);
+            });
+            block.querySelector('.plan-up-btn').addEventListener('click', e => {
+              e.stopPropagation();
+              shiftItemStartTime(p, -30);
+            });
+            block.querySelector('.plan-down-btn').addEventListener('click', e => {
+              e.stopPropagation();
+              shiftItemStartTime(p, 30);
             });
             block.querySelector('.plan-minus-btn').addEventListener('click', e => {
               e.stopPropagation();
@@ -2092,11 +2333,21 @@
                 <span class="tb-title">${escapeHtml(a.title)}</span>
               </div>
               <div class="tb-actions">
+                <button type="button" class="tb-mini-btn tb-step-btn act-up-btn" title="시작 시각 30분 앞당기기">▲30분</button>
+                <button type="button" class="tb-mini-btn tb-step-btn act-down-btn" title="시작 시각 30분 늦추기">▼30분</button>
                 <button type="button" class="tb-mini-btn tb-step-btn act-minus-btn" title="소요 시간 15분 줄이기">-15분</button>
                 <button type="button" class="tb-mini-btn tb-step-btn act-plus-btn" title="소요 시간 15분 늘리기">+15분</button>
                 <button type="button" class="tb-mini-btn actual-edit-btn">수정</button>
               </div>
             `;
+            block.querySelector('.act-up-btn').addEventListener('click', e => {
+              e.stopPropagation();
+              shiftItemStartTime(a, -30);
+            });
+            block.querySelector('.act-down-btn').addEventListener('click', e => {
+              e.stopPropagation();
+              shiftItemStartTime(a, 30);
+            });
             block.querySelector('.act-minus-btn').addEventListener('click', e => {
               e.stopPropagation();
               adjustItemDurationByStep(a, -15);
@@ -2139,10 +2390,17 @@
     if (!container) return;
 
     container.innerHTML = '';
-    state.routines.forEach(rtn => {
+    const todayRoutines = state.routines.filter(rtn => doesRoutineOccurOnDate(rtn, selectedDate));
+    if (todayRoutines.length === 0) {
+      container.innerHTML = `<p class="empty-guide">선택한 요일에 예정된 루틴이 없습니다. 루틴 플레이어 탭에서 전체 루틴을 확인하거나 새 루틴을 추가해보세요.</p>`;
+      return;
+    }
+
+    todayRoutines.forEach(rtn => {
       const cat = getCategoryById(rtn.categoryId);
       const totalMins = rtn.steps.reduce((acc, s) => acc + Number(s.minutes || 0), 0);
       const isDoneToday = Array.isArray(rtn.completedDates) && rtn.completedDates.includes(selectedDate);
+      const daysLabel = getRoutineDaysLabelKo(rtn);
 
       const card = document.createElement('div');
       card.className = 'routine-mini-card';
@@ -2151,7 +2409,7 @@
           <span class="rmc-title">${escapeHtml(rtn.name)}</span>
           <span class="cat-dot-tag" style="background:${cat.color}20;color:${cat.color}">${escapeHtml(cat.name)}</span>
         </div>
-        <div class="rmc-meta">권장 ${rtn.startTime || '07:00'} · 총 ${totalMins}분 · ${rtn.steps.length}단계</div>
+        <div class="rmc-meta">${escapeHtml(daysLabel)} · 권장 ${rtn.startTime || '07:00'} · 총 ${totalMins}분 · ${rtn.steps.length}단계</div>
         <div class="rmc-steps-preview">
           ${rtn.steps.map(s => `<span class="rmc-step-chip">${escapeHtml(s.title)} ${s.minutes}분</span>`).join('')}
         </div>
@@ -2285,6 +2543,7 @@
       state.routines.forEach(rtn => {
         const cat = getCategoryById(rtn.categoryId);
         const totalMins = rtn.steps.reduce((acc, s) => acc + Number(s.minutes || 0), 0);
+        const daysLabel = getRoutineDaysLabelKo(rtn);
         const card = document.createElement('div');
         card.className = 'routine-mini-card';
         card.innerHTML = `
@@ -2292,7 +2551,7 @@
             <span class="rmc-title">${escapeHtml(rtn.name)}</span>
             <span class="cat-dot-tag" style="background:${cat.color}20;color:${cat.color}">${escapeHtml(cat.name)}</span>
           </div>
-          <div class="rmc-meta">권장 시작 ${rtn.startTime} · 총 ${totalMins}분 · ${rtn.steps.length}개 행동</div>
+          <div class="rmc-meta">${escapeHtml(daysLabel)} · 권장 시작 ${rtn.startTime} · 총 ${totalMins}분 · ${rtn.steps.length}개 행동</div>
           <div class="rmc-steps-preview">
             ${rtn.steps.map((s, idx) => `<span class="rmc-step-chip">${idx + 1}. ${escapeHtml(s.title)} · ${s.minutes}분</span>`).join('')}
           </div>
@@ -2314,11 +2573,43 @@
     updateRoutinePlayerUI();
   }
 
+  function syncRoutinePlayerWallClock() {
+    if (!routinePlayer.running) return;
+    if (routinePlayer.paused) {
+      routinePlayer.stepElapsedSeconds = Math.floor(routinePlayer.stepBaseElapsedMs / 1000);
+      routinePlayer.totalElapsedSeconds = Math.floor(routinePlayer.totalBaseElapsedMs / 1000);
+      return;
+    }
+    const now = Date.now();
+    const stepMs = routinePlayer.stepBaseElapsedMs + Math.max(0, now - routinePlayer.stepStartTimestamp);
+    const totalMs = routinePlayer.totalBaseElapsedMs + Math.max(0, now - routinePlayer.totalStartTimestamp);
+    routinePlayer.stepElapsedSeconds = Math.floor(stepMs / 1000);
+    routinePlayer.totalElapsedSeconds = Math.floor(totalMs / 1000);
+  }
+
+  function toggleRoutinePlayerPause() {
+    if (!routinePlayer.running) return;
+    const now = Date.now();
+    if (!routinePlayer.paused) {
+      routinePlayer.stepBaseElapsedMs += Math.max(0, now - routinePlayer.stepStartTimestamp);
+      routinePlayer.totalBaseElapsedMs += Math.max(0, now - routinePlayer.totalStartTimestamp);
+      routinePlayer.paused = true;
+      syncRoutinePlayerWallClock();
+    } else {
+      routinePlayer.stepStartTimestamp = now;
+      routinePlayer.totalStartTimestamp = now;
+      routinePlayer.paused = false;
+    }
+    updateRoutinePlayerUI();
+    updateTopBannerUI();
+  }
+
   function startRoutinePlayer(routineId) {
     const rtn = state.routines.find(r => r.id === routineId);
     if (!rtn || !rtn.steps || rtn.steps.length === 0) return;
 
     clearInterval(routinePlayer.intervalId);
+    const now = Date.now();
     routinePlayer.activeRoutineId = rtn.id;
     routinePlayer.running = true;
     routinePlayer.paused = false;
@@ -2326,6 +2617,10 @@
     routinePlayer.stepTargetSeconds = Math.max(10, Number(rtn.steps[0].minutes || 1) * 60);
     routinePlayer.stepElapsedSeconds = 0;
     routinePlayer.totalElapsedSeconds = 0;
+    routinePlayer.stepStartTimestamp = now;
+    routinePlayer.stepBaseElapsedMs = 0;
+    routinePlayer.totalStartTimestamp = now;
+    routinePlayer.totalBaseElapsedMs = 0;
     routinePlayer.routineStartTimeStr = getNowTimeStr();
     routinePlayer.overtimeNotified = false;
 
@@ -2341,8 +2636,7 @@
 
   function tickRoutinePlayer() {
     if (!routinePlayer.running || routinePlayer.paused) return;
-    routinePlayer.stepElapsedSeconds += 1;
-    routinePlayer.totalElapsedSeconds += 1;
+    syncRoutinePlayerWallClock();
 
     if (
       routinePlayer.stepElapsedSeconds >= routinePlayer.stepTargetSeconds &&
@@ -2363,12 +2657,21 @@
     const rtn = state.routines.find(r => r.id === routinePlayer.activeRoutineId);
     if (!rtn) return;
 
+    syncRoutinePlayerWallClock();
+    const now = Date.now();
+    if (!routinePlayer.paused) {
+      routinePlayer.totalBaseElapsedMs += Math.max(0, now - routinePlayer.totalStartTimestamp);
+      routinePlayer.totalStartTimestamp = now;
+    }
+
     const nextIdx = routinePlayer.stepIndex + 1;
     if (nextIdx < rtn.steps.length) {
       routinePlayer.stepIndex = nextIdx;
       const nextStep = rtn.steps[nextIdx];
       routinePlayer.stepTargetSeconds = Math.max(10, Number(nextStep.minutes || 1) * 60);
       routinePlayer.stepElapsedSeconds = 0;
+      routinePlayer.stepBaseElapsedMs = 0;
+      routinePlayer.stepStartTimestamp = now;
       routinePlayer.overtimeNotified = false;
 
       playChimeSound('chime');
@@ -2378,12 +2681,40 @@
       updateRoutinePlayerUI();
       updateTopBannerUI();
     } else {
-      // 루틴 전체 완주!
       finishRoutineSuccess(rtn);
     }
   }
 
+  function goToPreviousRoutineStep() {
+    if (!routinePlayer.running) return;
+    const rtn = state.routines.find(r => r.id === routinePlayer.activeRoutineId);
+    if (!rtn || routinePlayer.stepIndex <= 0) return;
+
+    syncRoutinePlayerWallClock();
+    const now = Date.now();
+    if (!routinePlayer.paused) {
+      routinePlayer.totalBaseElapsedMs += Math.max(0, now - routinePlayer.totalStartTimestamp);
+      routinePlayer.totalStartTimestamp = now;
+    }
+
+    const prevIdx = routinePlayer.stepIndex - 1;
+    const prevStep = rtn.steps[prevIdx];
+    routinePlayer.stepIndex = prevIdx;
+    routinePlayer.stepTargetSeconds = Math.max(10, Number(prevStep.minutes || 1) * 60);
+    routinePlayer.stepElapsedSeconds = 0;
+    routinePlayer.stepBaseElapsedMs = 0;
+    routinePlayer.stepStartTimestamp = now;
+    routinePlayer.overtimeNotified = false;
+
+    playChimeSound('chime');
+    speakKorean(`이전 단계인 ${prevStep.title}로 돌아갑니다.`);
+    updateRoutinePlayerUI();
+    updateTopBannerUI();
+    showToast(`이전 단계 '${prevStep.title}'로 이동했습니다.`);
+  }
+
   function finishRoutineSuccess(rtn) {
+    syncRoutinePlayerWallClock();
     clearInterval(routinePlayer.intervalId);
     routinePlayer.running = false;
     routinePlayer.paused = false;
@@ -2393,10 +2724,10 @@
     if (!Array.isArray(rtn.completedDates)) rtn.completedDates = [];
     if (!rtn.completedDates.includes(todayStr)) {
       rtn.completedDates.push(todayStr);
-      state.settings.streakDays = (state.settings.streakDays || 1) + 1;
     }
+    state.settings.streakDays = computeRoutineStreakDays();
 
-    // 실제 소요 시간(최소 5분 또는 루틴 계획 시간)을 타임트래커(Actual)에 자동 기록
+    // 실제 소요 시간을 타임트래커 실제 기록에 자동 반영
     const plannedMins = rtn.steps.reduce((acc, s) => acc + Number(s.minutes || 0), 0);
     const actualMins = Math.max(5, Math.round(routinePlayer.totalElapsedSeconds / 60) || plannedMins);
     const startTime = routinePlayer.routineStartTimeStr || getNowTimeStr();
@@ -2448,6 +2779,7 @@
     const ringEl = document.getElementById('playerRingProgress');
     const queueListEl = document.getElementById('playerStepQueueList');
 
+    const btnPrev = document.getElementById('playerPrevStepBtn');
     const btnComplete = document.getElementById('playerCompleteStepBtn');
     const btnAdd5 = document.getElementById('playerAdd5MinBtn');
     const btnPause = document.getElementById('playerPauseResumeBtn');
@@ -2464,13 +2796,13 @@
     totalRemainEl.textContent = `총 ${totalMins}분`;
 
     const isRunning = routinePlayer.running && routinePlayer.activeRoutineId === rtn.id;
+    const currentIdx = isRunning ? routinePlayer.stepIndex : 0;
+    if (btnPrev) btnPrev.disabled = !isRunning || currentIdx <= 0;
     btnComplete.disabled = !isRunning;
     btnAdd5.disabled = !isRunning;
     btnPause.disabled = !isRunning;
     btnSkip.disabled = !isRunning;
     btnStop.disabled = !isRunning;
-
-    const currentIdx = isRunning ? routinePlayer.stepIndex : 0;
     const step = rtn.steps[currentIdx] || { title: '행동 없음', minutes: 1, tip: '' };
     const nextStep = rtn.steps[currentIdx + 1];
 
@@ -3393,20 +3725,68 @@
   }
 
   // -------------------- 탭 4: 타임트래커 분석 보고서 & 다음 달 목표 설계 --------------------
+  function getReportDateRange(period, baseDateStr) {
+    const refStr = baseDateStr || getTodayStr();
+    const [ry, rm] = refStr.split('-').map(Number);
+
+    if (period === 'today') {
+      return {
+        startDate: refStr,
+        endDate: refStr,
+        dateList: [refStr],
+        periodLabel: '오늘'
+      };
+    }
+
+    if (period === 'last7Days') {
+      const startDate = addDaysStr(refStr, -6);
+      const dateList = [];
+      for (let i = 0; i < 7; i++) {
+        dateList.push(addDaysStr(startDate, i));
+      }
+      return {
+        startDate,
+        endDate: refStr,
+        dateList,
+        periodLabel: '최근 7일'
+      };
+    }
+
+    if (period === 'lastMonth') {
+      const prevFirst = new Date(ry, rm - 2, 1);
+      const prevYear = prevFirst.getFullYear();
+      const prevMonthIdx = prevFirst.getMonth();
+      const lastDay = new Date(prevYear, prevMonthIdx + 1, 0).getDate();
+      const dateList = [];
+      for (let d = 1; d <= lastDay; d++) {
+        dateList.push(toDateStr(new Date(prevYear, prevMonthIdx, d)));
+      }
+      return {
+        startDate: dateList[0],
+        endDate: dateList[dateList.length - 1],
+        dateList,
+        periodLabel: '지난달'
+      };
+    }
+
+    // 기본값: 이번 달 (선택 날짜가 속한 달 전체)
+    const lastDay = new Date(ry, rm, 0).getDate();
+    const dateList = [];
+    for (let d = 1; d <= lastDay; d++) {
+      dateList.push(toDateStr(new Date(ry, rm - 1, d)));
+    }
+    return {
+      startDate: dateList[0],
+      endDate: dateList[dateList.length - 1],
+      dateList,
+      periodLabel: '이번 달'
+    };
+  }
+
   function computeReportStatistics() {
     const baseDateStr = selectedDate || getTodayStr();
-    const ymPrefix = baseDateStr.slice(0, 7); // YYYY-MM
-    const sevenDaysAgo = addDaysStr(baseDateStr, -6);
-
-    const filterFn = item => {
-      if (!item.date) return false;
-      if (currentReportPeriod === 'today') return item.date === baseDateStr;
-      if (currentReportPeriod === 'last7Days') return item.date >= sevenDaysAgo && item.date <= baseDateStr;
-      return item.date.startsWith(ymPrefix);
-    };
-
-    const filteredPlans = state.schedules.filter(filterFn);
-    const filteredActuals = state.actualLogs.filter(filterFn);
+    const range = getReportDateRange(currentReportPeriod, baseDateStr);
+    const dateSet = new Set(range.dateList);
 
     const byCategory = {};
     state.categories.forEach(c => {
@@ -3419,10 +3799,30 @@
       };
     });
 
-    filteredPlans.forEach(p => {
+    // 정기 반복 일정을 포함해 선택 기간 내 모든 발생 날짜의 계획 시간 합산
+    state.schedules.forEach(p => {
+      if (!matchesSelectedProjectTag(p)) return;
       const bucket = byCategory[p.categoryId] || Object.values(byCategory)[0];
-      if (bucket) bucket.planMinutes += durationMinutes(p.startTime, p.endTime);
+      if (!bucket) return;
+      const dur = durationMinutes(p.startTime, p.endTime);
+      if (!p.repeat || p.repeat === 'none') {
+        if (p.date && dateSet.has(p.date)) {
+          bucket.planMinutes += dur;
+        }
+      } else {
+        let occCount = 0;
+        for (let i = 0; i < range.dateList.length; i++) {
+          if (doesItemOccurOnDate(p, range.dateList[i], false)) {
+            occCount += 1;
+          }
+        }
+        bucket.planMinutes += dur * occCount;
+      }
     });
+
+    const filteredActuals = state.actualLogs.filter(
+      a => matchesSelectedProjectTag(a) && a.date && dateSet.has(a.date)
+    );
 
     filteredActuals.forEach(a => {
       const bucket = byCategory[a.categoryId] || Object.values(byCategory)[0];
@@ -3432,7 +3832,7 @@
     const totalPlanMinutes = Object.values(byCategory).reduce((s, x) => s + x.planMinutes, 0);
     const totalActualMinutes = Object.values(byCategory).reduce((s, x) => s + x.actualMinutes, 0);
 
-    // 시간대별 실제 집중 분석 (오전 / 오후 / 저녁)
+    // 시간대별 실제 집중 분석
     let morningMins = 0;
     let afternoonMins = 0;
     let nightMins = 0;
@@ -3452,11 +3852,18 @@
       byCategory: Object.values(byCategory),
       totalPlanMinutes,
       totalActualMinutes,
-      goldenTimeLabel
+      goldenTimeLabel,
+      dateList: range.dateList,
+      dateSet,
+      periodLabel: range.periodLabel
     };
   }
 
   function renderReportAndGoalsTab() {
+    document.querySelectorAll('#reportPeriodTabs .filter-pill').forEach(btn => {
+      btn.classList.toggle('active', btn.dataset.period === currentReportPeriod);
+    });
+
     const stats = computeReportStatistics();
     const totalActualHours = (stats.totalActualMinutes / 60).toFixed(1);
     document.getElementById('reportTotalActualText').textContent = `총 ${totalActualHours}시간`;
@@ -3483,10 +3890,10 @@
 
       donutBox.innerHTML = `
         <svg width="170" height="170" viewBox="0 0 170 170">
-          <circle cx="85" cy="85" r="${radius}" fill="none" stroke="#E2E8F0" stroke-width="24" />
+          <circle cx="85" cy="85" r="${radius}" fill="none" stroke="var(--border-color)" stroke-width="24" />
           ${segmentsSvg}
-          <text x="85" y="80" text-anchor="middle" font-size="12" fill="#64748B" font-weight="700">실제 기록</text>
-          <text x="85" y="100" text-anchor="middle" font-size="17" fill="#0F172A" font-weight="800">${totalActualHours}h</text>
+          <text x="85" y="80" text-anchor="middle" font-size="12" fill="var(--text-sub)" font-weight="700">${escapeHtml(stats.periodLabel)} 기록</text>
+          <text x="85" y="100" text-anchor="middle" font-size="17" fill="var(--text-main)" font-weight="800">${totalActualHours}h</text>
         </svg>
       `;
 
@@ -3554,27 +3961,49 @@
         .join('');
     }
 
-    // 2-2. 프로젝트 태그별 투입 시간 및 진행 현황 테이블
+    // 2-2. 프로젝트 태그별 투입 시간 및 진행 현황 테이블 (선택 기간 및 정기 일정 발생 횟수 반영)
     const projTbody = document.getElementById('reportProjectTagTableBody');
     if (projTbody) {
       const allTags = getAllProjectTags();
       if (allTags.length === 0) {
-        projTbody.innerHTML = `<tr><td colspan="5" style="text-align:center;color:#64748B;">등록된 @프로젝트태그가 없습니다. 일정이나 할 일에 프로젝트 태그를 지정해 보세요.</td></tr>`;
+        projTbody.innerHTML = `<tr><td colspan="5" style="text-align:center;color:var(--text-sub);">등록된 @프로젝트태그가 없습니다. 일정이나 할 일에 프로젝트 태그를 지정해 보세요.</td></tr>`;
       } else {
         projTbody.innerHTML = allTags
           .map(tag => {
             const tagSch = state.schedules.filter(s => cleanProjectTag(s.projectTag) === tag);
             const recSchCount = tagSch.filter(s => s.repeat && s.repeat !== 'none').length;
+            let occTotalCount = 0;
+            let planMins = 0;
+            tagSch.forEach(s => {
+              const dur = durationMinutes(s.startTime, s.endTime);
+              if (!s.repeat || s.repeat === 'none') {
+                if (s.date && stats.dateSet.has(s.date)) {
+                  occTotalCount += 1;
+                  planMins += dur;
+                }
+              } else {
+                let occ = 0;
+                for (let i = 0; i < stats.dateList.length; i++) {
+                  if (doesItemOccurOnDate(s, stats.dateList[i], false)) occ += 1;
+                }
+                occTotalCount += occ;
+                planMins += dur * occ;
+              }
+            });
             const tagTodos = state.todos.filter(t => cleanProjectTag(t.projectTag) === tag);
-            const doneTodos = tagTodos.filter(t => isItemCompletedOnDate(t, selectedDate)).length;
-            const planMins = tagSch.reduce((sum, s) => sum + durationMinutes(s.startTime, s.endTime), 0);
+            const doneTodos = tagTodos.filter(t => {
+              if (t.repeat && t.repeat !== 'none') {
+                return Array.isArray(t.completedDates) && t.completedDates.some(d => stats.dateSet.has(d));
+              }
+              return Boolean(t.completed);
+            }).length;
             const actMins = state.actualLogs
-              .filter(a => cleanProjectTag(a.projectTag) === tag)
+              .filter(a => cleanProjectTag(a.projectTag) === tag && a.date && stats.dateSet.has(a.date))
               .reduce((sum, a) => sum + durationMinutes(a.startTime, a.endTime), 0);
             return `
               <tr>
                 <td><span class="pg-tag-badge">@${escapeHtml(tag)}</span></td>
-                <td>총 ${tagSch.length}건${recSchCount > 0 ? ` · 정기 ${recSchCount}건` : ''}</td>
+                <td>기간 내 ${occTotalCount}회${recSchCount > 0 ? ` · 정기 ${recSchCount}종` : ''}</td>
                 <td>${doneTodos}/${tagTodos.length} 완료</td>
                 <td>${formatDurationKo(planMins)}</td>
                 <td><strong>${formatDurationKo(actMins)}</strong></td>
@@ -3606,7 +4035,7 @@
             <span style="display:inline-flex;align-items:center;gap:6px;font-weight:700;font-size:0.86rem;">
               <span class="legend-color-box" style="background:${c.color}"></span>
               ${escapeHtml(c.name)}
-              <span style="font-size:0.75rem;color:#64748B;font-weight:500;">이번 달 실제 ${currentHours}시간</span>
+              <span style="font-size:0.75rem;color:var(--text-sub);font-weight:500;">${escapeHtml(stats.periodLabel)} 실제 ${currentHours}시간</span>
             </span>
             <div class="budget-input-group">
               <span>다음 달 목표</span>
@@ -3680,81 +4109,177 @@
       });
 
       card.querySelector('.goal-del-btn').addEventListener('click', () => {
+        pushUndoSnapshot('월간 목표 삭제');
         state.monthlyGoals = state.monthlyGoals.filter(g => g.id !== goal.id);
         saveState();
         renderMonthlyGoalList();
+        showToast(`'${goal.title}' 목표가 삭제되었습니다.`, { withUndo: true });
       });
 
       container.appendChild(card);
     });
   }
 
-  // -------------------- 알람 감시 및 끈질긴 리마인드 엔진 --------------------
+  // -------------------- 알람 감시 · 사전 알림 · 절전 복귀 보정 엔진 --------------------
   function checkScheduledAlarms() {
     const todayStr = getTodayStr();
-    const nowTime = getNowTimeStr();
+    const nowMins = timeToMinutes(getNowTimeStr());
 
-    // 1. 오늘 일정 알람 확인 (정기 반복 일정 포함)
-    state.schedules.forEach(s => {
-      if (doesItemOccurOnDate(s, todayStr, false) && s.alarm && !isItemCompletedOnDate(s, todayStr) && s.startTime === nowTime) {
-        const key = `sch_${s.id}_${todayStr}_${nowTime}`;
-        if (!triggeredAlarmKeys.has(key)) {
-          triggeredAlarmKeys.add(key);
+    // 이미 알람 모달이 떠 있는 상태면 중복 호출 방지
+    const modalEl = document.getElementById('alarmModal');
+    if (modalEl && !modalEl.classList.contains('hidden')) return;
+
+    // 1. 오늘 일정 알람 확인 (정기 반복 일정 + 사전 예고 알림 + 절전 복귀 10분 이내 놓친 알람 보정)
+    for (let i = 0; i < state.schedules.length; i++) {
+      const s = state.schedules[i];
+      if (!s.alarm || !s.startTime) continue;
+      if (!doesItemOccurOnDate(s, todayStr, false) || isItemCompletedOnDate(s, todayStr)) continue;
+
+      const targetMins = timeToMinutes(s.startTime);
+      const leadMins = Math.max(0, Number(s.alarmLeadMinutes || 0));
+
+      // 사전 예고 알림 확인
+      if (leadMins > 0) {
+        const preTarget = targetMins - leadMins;
+        if (nowMins >= preTarget && nowMins < targetMins && nowMins - preTarget <= 3) {
+          const preKey = `pre_sch_${s.id}_${todayStr}_${s.startTime}_${leadMins}`;
+          if (!triggeredAlarmKeys.has(preKey)) {
+            markAlarmKeyTriggered(preKey);
+            triggerAlarmModal({
+              type: 'schedule',
+              alarmKind: 'pre',
+              leadMinutes: leadMins,
+              title: s.title,
+              time: s.startTime,
+              categoryId: s.categoryId,
+              projectTag: s.projectTag || '',
+              refId: s.id
+            });
+            return;
+          }
+        }
+      }
+
+      // 정각 및 절전 복귀 후 10분 이내 놓친 알람 확인
+      const diffMins = nowMins - targetMins;
+      if (diffMins >= 0 && diffMins <= 10) {
+        const mainKey = `sch_${s.id}_${todayStr}_${s.startTime}`;
+        if (!triggeredAlarmKeys.has(mainKey)) {
+          markAlarmKeyTriggered(mainKey);
           triggerAlarmModal({
             type: 'schedule',
+            alarmKind: diffMins > 1 ? 'catchup' : 'ontime',
+            lateMinutes: diffMins,
             title: s.title,
             time: s.startTime,
             categoryId: s.categoryId,
             projectTag: s.projectTag || '',
             refId: s.id
           });
+          return;
         }
       }
-    });
+    }
 
-    // 2. 루틴 시작 알람 확인
-    state.routines.forEach(r => {
+    // 2. 루틴 시작 알람 확인 (실천 요일 반영 + 사전 예고 알림 + 절전 복귀 10분 보정)
+    for (let i = 0; i < state.routines.length; i++) {
+      const r = state.routines[i];
+      if (!r.alarm || !r.startTime) continue;
+      if (!doesRoutineOccurOnDate(r, todayStr)) continue;
       const doneToday = Array.isArray(r.completedDates) && r.completedDates.includes(todayStr);
-      if (r.alarm && !doneToday && r.startTime === nowTime) {
-        const key = `rtn_${r.id}_${todayStr}_${nowTime}`;
-        if (!triggeredAlarmKeys.has(key)) {
-          triggeredAlarmKeys.add(key);
+      if (doneToday) continue;
+
+      const targetMins = timeToMinutes(r.startTime);
+      const leadMins = Math.max(0, Number(r.alarmLeadMinutes || 0));
+
+      if (leadMins > 0) {
+        const preTarget = targetMins - leadMins;
+        if (nowMins >= preTarget && nowMins < targetMins && nowMins - preTarget <= 3) {
+          const preKey = `pre_rtn_${r.id}_${todayStr}_${r.startTime}_${leadMins}`;
+          if (!triggeredAlarmKeys.has(preKey)) {
+            markAlarmKeyTriggered(preKey);
+            triggerAlarmModal({
+              type: 'routine',
+              alarmKind: 'pre',
+              leadMinutes: leadMins,
+              title: r.name,
+              time: r.startTime,
+              categoryId: r.categoryId,
+              refId: r.id
+            });
+            return;
+          }
+        }
+      }
+
+      const diffMins = nowMins - targetMins;
+      if (diffMins >= 0 && diffMins <= 10) {
+        const mainKey = `rtn_${r.id}_${todayStr}_${r.startTime}`;
+        if (!triggeredAlarmKeys.has(mainKey)) {
+          markAlarmKeyTriggered(mainKey);
           triggerAlarmModal({
             type: 'routine',
+            alarmKind: diffMins > 1 ? 'catchup' : 'ontime',
+            lateMinutes: diffMins,
             title: r.name,
             time: r.startTime,
             categoryId: r.categoryId,
             refId: r.id
           });
+          return;
         }
       }
-    });
+    }
   }
 
   function triggerAlarmModal(alarmObj) {
     activeAlarmItem = alarmObj;
     const modal = document.getElementById('alarmModal');
+    const badgeEl = document.getElementById('alarmModalBadge');
+    const descEl = document.getElementById('alarmModalDesc');
+
     document.getElementById('alarmModalTitle').textContent = alarmObj.title;
-    document.getElementById('alarmModalTime').textContent = `예정 시각 ${alarmObj.time}`;
+
+    if (alarmObj.alarmKind === 'pre') {
+      if (badgeEl) badgeEl.textContent = '사전 예고 알림';
+      document.getElementById('alarmModalTime').textContent = `${alarmObj.leadMinutes}분 뒤 시작 예정 · ${alarmObj.time}`;
+      if (descEl) descEl.textContent = '곧 시작할 일정이나 루틴을 미리 준비하세요.';
+    } else if (alarmObj.alarmKind === 'catchup') {
+      if (badgeEl) badgeEl.textContent = '절전 복귀 보정 알림';
+      document.getElementById('alarmModalTime').textContent = `예정 시각 ${alarmObj.time} · ${alarmObj.lateMinutes}분 경과`;
+      if (descEl) descEl.textContent = '화면 대기 중 지나간 알람을 놓치지 않도록 즉시 알려드립니다.';
+    } else {
+      if (badgeEl) badgeEl.textContent = '정각 알람 및 리마인드';
+      document.getElementById('alarmModalTime').textContent = `예정 시각 ${alarmObj.time}`;
+      if (descEl) descEl.textContent = '확인을 누르지 않으면 놓치지 않도록 3분 뒤 다시 알림이 울립니다.';
+    }
+
     modal.classList.remove('hidden');
 
     const announceAlarm = () => {
       playChimeSound('alarm');
-      speakKorean(`알람 시간입니다. ${alarmObj.title}을 시작할 시간입니다.`);
-      sendBrowserNotification('타임플로우 정각 알람', `${alarmObj.title} · ${alarmObj.time} 시작할 시간입니다!`);
+      if (alarmObj.alarmKind === 'pre') {
+        speakKorean(`사전 알림입니다. ${alarmObj.leadMinutes}분 뒤 ${alarmObj.title} 시작 예정입니다.`);
+        sendBrowserNotification('타임플로우 사전 예고 알림', `${alarmObj.leadMinutes}분 뒤 ${alarmObj.title} · ${alarmObj.time}`);
+      } else {
+        speakKorean(`알람 시간입니다. ${alarmObj.title}을 시작할 시간입니다.`);
+        sendBrowserNotification('타임플로우 정각 알람', `${alarmObj.title} · ${alarmObj.time} 시작할 시간입니다!`);
+      }
     };
 
     announceAlarm();
 
     // 미확인 시 3분 간격으로 반복 리마인드
     clearInterval(alarmRepeatIntervalId);
-    alarmRepeatIntervalId = setInterval(() => {
-      if (!modal.classList.contains('hidden')) {
-        announceAlarm();
-      } else {
-        clearInterval(alarmRepeatIntervalId);
-      }
-    }, 180000);
+    if (alarmObj.alarmKind !== 'pre') {
+      alarmRepeatIntervalId = setInterval(() => {
+        if (!modal.classList.contains('hidden')) {
+          announceAlarm();
+        } else {
+          clearInterval(alarmRepeatIntervalId);
+        }
+      }, 180000);
+    }
   }
 
   function closeAlarmModal() {
@@ -4167,11 +4692,13 @@
     document.getElementById('itemModalEndTime').value = endTime;
     const tagInput = document.getElementById('itemModalProjectTag');
     if (tagInput) {
-      const fallbackTag = selectedProjectTag && selectedProjectTag !== '__UNASSIGNED__' ? selectedProjectTag : '';
+      const fallbackTag = selectedProjectTag && selectedProjectTag !== '__UNTAGGED__' ? selectedProjectTag : '';
       tagInput.value = cleanProjectTag(defaultTag || fallbackTag);
     }
     const repeatSel = document.getElementById('itemModalRepeat');
     if (repeatSel) repeatSel.value = defaultRepeat || 'none';
+    const alarmLeadSel = document.getElementById('itemModalAlarmLead');
+    if (alarmLeadSel) alarmLeadSel.value = '0';
     document.getElementById('itemModalAlarm').checked = true;
     document.getElementById('itemModalImportant').checked = false;
     document.getElementById('itemModalDeleteBtn').classList.add('hidden');
@@ -4194,6 +4721,8 @@
     document.getElementById('itemModalEndTime').value = item.endTime || '10:00';
     document.getElementById('itemModalAlarm').checked = item.alarm !== false;
     document.getElementById('itemModalImportant').checked = Boolean(item.important);
+    const alarmLeadSel = document.getElementById('itemModalAlarmLead');
+    if (alarmLeadSel) alarmLeadSel.value = String(item.alarmLeadMinutes || 0);
     document.getElementById('itemModalDeleteBtn').classList.remove('hidden');
     toggleItemModalTimeVisibility(type);
     document.getElementById('itemModal').classList.remove('hidden');
@@ -4202,13 +4731,23 @@
   function toggleItemModalTimeVisibility(type) {
     const timeRow = document.getElementById('itemModalTimeRow');
     if (timeRow) {
-      if (type === 'todo') timeRow.classList.add('hidden');
-      else timeRow.classList.remove('hidden');
+      timeRow.classList.toggle('hidden', type === 'todo');
+    }
+    const shiftRow = document.getElementById('itemModalShiftRow');
+    if (shiftRow) {
+      shiftRow.classList.toggle('hidden', type === 'todo');
     }
     const repeatWrap = document.getElementById('itemModalRepeatWrap');
     if (repeatWrap) {
-      if (type === 'actual') repeatWrap.classList.add('hidden');
-      else repeatWrap.classList.remove('hidden');
+      repeatWrap.classList.toggle('hidden', type === 'actual');
+    }
+    const alarmRow = document.getElementById('itemModalAlarmRow');
+    if (alarmRow) {
+      alarmRow.classList.toggle('hidden', type === 'actual');
+    }
+    const alarmLeadWrap = document.getElementById('itemModalAlarmLeadWrap');
+    if (alarmLeadWrap) {
+      alarmLeadWrap.classList.toggle('hidden', type !== 'schedule');
     }
   }
 
@@ -4221,6 +4760,17 @@
     document.getElementById('routineModalCategory').value = isEdit ? rtn.categoryId : state.categories[0].id;
     document.getElementById('routineModalTime').value = isEdit ? rtn.startTime || '07:00' : '07:00';
     document.getElementById('routineModalAlarm').checked = isEdit ? rtn.alarm !== false : true;
+    const rtnLeadSel = document.getElementById('routineModalAlarmLead');
+    if (rtnLeadSel) rtnLeadSel.value = String(isEdit ? rtn.alarmLeadMinutes || 0 : 0);
+
+    const activeDays =
+      isEdit && Array.isArray(rtn.activeDays) && rtn.activeDays.length > 0
+        ? rtn.activeDays.map(Number)
+        : [0, 1, 2, 3, 4, 5, 6];
+    document.querySelectorAll('#routineActiveDaysGroup .day-toggle-btn').forEach(btn => {
+      const dow = Number(btn.dataset.dow);
+      btn.classList.toggle('active', activeDays.includes(dow));
+    });
 
     const delBtn = document.getElementById('routineModalDeleteBtn');
     if (isEdit) delBtn.classList.remove('hidden');
@@ -4244,12 +4794,24 @@
     const row = document.createElement('div');
     row.className = 'step-edit-row';
     row.innerHTML = `
+      <div class="step-reorder-btns">
+        <button type="button" class="step-move-btn step-up-btn" title="위로 이동">↑</button>
+        <button type="button" class="step-move-btn step-down-btn" title="아래로 이동">↓</button>
+      </div>
       <input type="text" class="step-row-title" placeholder="행동 이름" value="${escapeHtml(title)}" required />
       <input type="number" class="step-row-mins" min="1" max="180" value="${Number(minutes || 5)}" title="목표 시간 분 단위" />
       <span style="font-size:0.78rem;color:#64748B;">분</span>
       <input type="text" class="step-row-tip" placeholder="음성 안내 팁" value="${escapeHtml(tip || '')}" />
-      <button type="button" class="btn-xs btn-danger-ghost step-row-del">&times;</button>
+      <button type="button" class="btn-xs btn-danger-ghost step-row-del" title="단계 삭제">&times;</button>
     `;
+    row.querySelector('.step-up-btn').addEventListener('click', () => {
+      const prev = row.previousElementSibling;
+      if (prev) container.insertBefore(row, prev);
+    });
+    row.querySelector('.step-down-btn').addEventListener('click', () => {
+      const next = row.nextElementSibling;
+      if (next) container.insertBefore(next, row);
+    });
     row.querySelector('.step-row-del').addEventListener('click', () => {
       if (container.querySelectorAll('.step-edit-row').length > 1) {
         row.remove();
@@ -4315,6 +4877,7 @@
     return {
       ...fallback,
       ...rawState,
+      updatedAt: rawState.updatedAt || '',
       settings: { ...fallback.settings, ...(rawState.settings || {}) },
       reviewNotes: { ...fallback.reviewNotes, ...(rawState.reviewNotes || {}) },
       timeBudgets: { ...fallback.timeBudgets, ...(rawState.timeBudgets || {}) },
@@ -4327,11 +4890,185 @@
     };
   }
 
-  // -------------------- 클라우드 동기화 (Supabase 직접 + Worker 하이브리드) --------------------
+  // -------------------- 클라우드 동기화 (자동 동기화 + 수동 업로드/불러오기) --------------------
+  function updateSyncHeaderUI(statusMode = 'idle') {
+    const dotEl = document.getElementById('headerSyncDot');
+    const labelEl = document.getElementById('headerSyncLabel');
+    const hasCode = Boolean(state.settings.syncCode && state.settings.syncCode.trim().length >= 3);
+    const autoOn = state.settings.autoSync !== false;
+
+    if (dotEl) {
+      dotEl.classList.toggle('hidden', !hasCode);
+      dotEl.classList.toggle('syncing', hasCode && statusMode === 'syncing');
+      dotEl.classList.toggle('error', hasCode && statusMode === 'error');
+    }
+    if (labelEl) {
+      if (hasCode && statusMode === 'syncing') {
+        labelEl.textContent = '동기화 중';
+      } else if (hasCode && autoOn) {
+        labelEl.textContent = '자동 동기화 켜짐';
+      } else {
+        labelEl.textContent = '동기화 · 캘린더 연동';
+      }
+    }
+  }
+
+  async function pushStateToCloudRaw(rawCode) {
+    const code = String(rawCode || '').trim().toUpperCase();
+    if (code.length < 3) throw new Error('동기화 코드 부족');
+    const dbKey = `TIMEFLOW:${code}`;
+
+    let savedOk = false;
+    let cloudUpdatedAt = state.updatedAt || new Date().toISOString();
+
+    try {
+      const workerRes = await fetch('/api/sync', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ action: 'save', syncCode: code, state })
+      });
+      if (workerRes.ok) {
+        const wData = await workerRes.json().catch(() => null);
+        if (wData && wData.ok) {
+          savedOk = true;
+          if (wData.updatedAt) cloudUpdatedAt = wData.updatedAt;
+        }
+      }
+    } catch (_) {}
+
+    if (!savedOk) {
+      const nowIso = new Date().toISOString();
+      const res = await fetch(`${SUPABASE_URL}/rest/v1/escape_rooms`, {
+        method: 'POST',
+        headers: {
+          apikey: SUPABASE_KEY,
+          Authorization: `Bearer ${SUPABASE_KEY}`,
+          'Content-Type': 'application/json',
+          Prefer: 'resolution=merge-duplicates,return=minimal'
+        },
+        body: JSON.stringify({
+          code: dbKey,
+          room_data: state,
+          updated_at: nowIso
+        })
+      });
+      if (!res.ok) throw new Error('업로드 실패');
+      cloudUpdatedAt = nowIso;
+    }
+
+    return cloudUpdatedAt;
+  }
+
+  async function pullStateFromCloudRaw(rawCode) {
+    const code = String(rawCode || '').trim().toUpperCase();
+    if (code.length < 3) return null;
+    const dbKey = `TIMEFLOW:${code}`;
+
+    try {
+      const workerRes = await fetch('/api/sync', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ action: 'load', syncCode: code })
+      });
+      if (workerRes.ok) {
+        const wData = await workerRes.json().catch(() => null);
+        if (wData && wData.ok && wData.found && wData.state) {
+          return {
+            state: wData.state,
+            updatedAt: wData.updatedAt || wData.state.updatedAt || ''
+          };
+        }
+      }
+    } catch (_) {}
+
+    const res = await fetch(
+      `${SUPABASE_URL}/rest/v1/escape_rooms?code=eq.${encodeURIComponent(dbKey)}&select=room_data,updated_at`,
+      {
+        headers: {
+          apikey: SUPABASE_KEY,
+          Authorization: `Bearer ${SUPABASE_KEY}`
+        }
+      }
+    );
+    if (!res.ok) throw new Error('조회 실패');
+    const rows = await res.json();
+    if (Array.isArray(rows) && rows.length > 0 && rows[0].room_data) {
+      return {
+        state: rows[0].room_data,
+        updatedAt: rows[0].updated_at || rows[0].room_data.updatedAt || ''
+      };
+    }
+    return null;
+  }
+
+  function scheduleAutoCloudSave() {
+    const rawCode = String(state.settings.syncCode || '').trim().toUpperCase();
+    if (rawCode.length < 3 || state.settings.autoSync === false) return;
+
+    clearTimeout(autoSyncTimerId);
+    autoSyncTimerId = setTimeout(async () => {
+      try {
+        updateSyncHeaderUI('syncing');
+        const cloudUpdatedAt = await pushStateToCloudRaw(rawCode);
+        state.updatedAt = cloudUpdatedAt || state.updatedAt;
+        try {
+          localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
+        } catch (_) {}
+        updateSyncHeaderUI('idle');
+        const statusEl = document.getElementById('cloudSyncStatusText');
+        if (statusEl) {
+          statusEl.textContent = `자동 클라우드 동기화 완료 · ${new Date().toLocaleTimeString()}`;
+        }
+      } catch (_) {
+        updateSyncHeaderUI('error');
+      }
+    }, 2200);
+  }
+
+  async function checkCloudLatestOnStartup(silent = true) {
+    const rawCode = String(state.settings.syncCode || '').trim().toUpperCase();
+    if (rawCode.length < 3 || state.settings.autoSync === false) return;
+
+    lastAutoCloudPullAt = Date.now();
+    try {
+      updateSyncHeaderUI('syncing');
+      const pulled = await pullStateFromCloudRaw(rawCode);
+      updateSyncHeaderUI('idle');
+      if (!pulled || !pulled.state) return;
+
+      const remoteTime = pulled.updatedAt ? Date.parse(pulled.updatedAt) : 0;
+      const localTime = state.updatedAt ? Date.parse(state.updatedAt) : 0;
+
+      // 원격 데이터가 로컬보다 최신일 때 자동 반영
+      if (remoteTime && (!localTime || remoteTime > localTime + 1500)) {
+        const keepDark = state.settings.darkMode;
+        const keepAutoSync = state.settings.autoSync;
+        state = normalizeImportedState(pulled.state);
+        state.settings.syncCode = rawCode;
+        state.settings.autoSync = keepAutoSync;
+        if (typeof pulled.state?.settings?.darkMode !== 'boolean') {
+          state.settings.darkMode = keepDark;
+        }
+        state.updatedAt = pulled.updatedAt || new Date().toISOString();
+        saveState({ skipAutoSync: true, touchTimestamp: false });
+        renderAll();
+        const statusEl = document.getElementById('cloudSyncStatusText');
+        if (statusEl) {
+          statusEl.textContent = `최신 클라우드 데이터 자동 반영 · ${new Date().toLocaleTimeString()}`;
+        }
+        if (!silent) {
+          showToast('클라우드의 최신 데이터를 자동으로 불러왔습니다.');
+        }
+      }
+    } catch (_) {
+      updateSyncHeaderUI('error');
+    }
+  }
+
   async function syncToCloud(action = 'save') {
     const codeInput = document.getElementById('cloudSyncCodeInput');
     const statusEl = document.getElementById('cloudSyncStatusText');
-    const rawCode = String(codeInput.value || state.settings.syncCode || '').trim().toUpperCase();
+    const rawCode = String((codeInput && codeInput.value) || state.settings.syncCode || '').trim().toUpperCase();
 
     if (rawCode.length < 3) {
       showToast('동기화 코드를 3글자 이상 입력해 주세요.');
@@ -4339,93 +5076,48 @@
     }
 
     state.settings.syncCode = rawCode;
-    saveState();
+    saveState({ skipAutoSync: true });
+    updateSyncHeaderUI('syncing');
 
-    const dbKey = `TIMEFLOW:${rawCode}`;
-    statusEl.textContent = action === 'save' ? '클라우드에 업로드 중...' : '클라우드에서 불러오는 중...';
+    if (statusEl) {
+      statusEl.textContent = action === 'save' ? '클라우드에 업로드 중...' : '클라우드에서 불러오는 중...';
+    }
 
     try {
       if (action === 'save') {
-        let savedOk = false;
-        try {
-          const workerRes = await fetch('/api/sync', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ action: 'save', syncCode: rawCode, state })
-          });
-          if (workerRes.ok) {
-            const wData = await workerRes.json().catch(() => null);
-            if (wData && wData.ok) savedOk = true;
-          }
-        } catch (_) {}
-
-        if (!savedOk) {
-          const nowIso = new Date().toISOString();
-          const res = await fetch(`${SUPABASE_URL}/rest/v1/escape_rooms`, {
-            method: 'POST',
-            headers: {
-              apikey: SUPABASE_KEY,
-              Authorization: `Bearer ${SUPABASE_KEY}`,
-              'Content-Type': 'application/json',
-              Prefer: 'resolution=merge-duplicates,return=minimal'
-            },
-            body: JSON.stringify({
-              code: dbKey,
-              room_data: state,
-              updated_at: nowIso
-            })
-          });
-          if (!res.ok) throw new Error('업로드 실패');
+        clearTimeout(autoSyncTimerId);
+        const cloudUpdatedAt = await pushStateToCloudRaw(rawCode);
+        state.updatedAt = cloudUpdatedAt || state.updatedAt;
+        saveState({ skipAutoSync: true, touchTimestamp: false });
+        updateSyncHeaderUI('idle');
+        if (statusEl) {
+          statusEl.textContent = `클라우드 업로드 완료 · ${new Date().toLocaleTimeString()}`;
         }
-        statusEl.textContent = `클라우드 업로드 완료 · ${new Date().toLocaleTimeString()}`;
         showToast(`동기화 코드 '${rawCode}'로 클라우드 저장이 완료되었습니다.`);
       } else {
-        let loadedData = null;
-        try {
-          const workerRes = await fetch('/api/sync', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ action: 'load', syncCode: rawCode })
-          });
-          if (workerRes.ok) {
-            const wData = await workerRes.json().catch(() => null);
-            if (wData && wData.ok && wData.found && wData.state) {
-              loadedData = wData.state;
-            }
-          }
-        } catch (_) {}
-
-        if (!loadedData) {
-          const res = await fetch(
-            `${SUPABASE_URL}/rest/v1/escape_rooms?code=eq.${encodeURIComponent(dbKey)}&select=room_data,updated_at`,
-            {
-              headers: {
-                apikey: SUPABASE_KEY,
-                Authorization: `Bearer ${SUPABASE_KEY}`
-              }
-            }
-          );
-          if (!res.ok) throw new Error('조회 실패');
-          const rows = await res.json();
-          if (Array.isArray(rows) && rows.length > 0 && rows[0].room_data) {
-            loadedData = rows[0].room_data;
-          }
-        }
-
-        if (!loadedData) {
-          statusEl.textContent = '해당 동기화 코드로 저장된 데이터가 없습니다.';
+        const pulled = await pullStateFromCloudRaw(rawCode);
+        if (!pulled || !pulled.state) {
+          updateSyncHeaderUI('idle');
+          if (statusEl) statusEl.textContent = '해당 동기화 코드로 저장된 데이터가 없습니다.';
           showToast('해당 코드로 저장된 클라우드 데이터를 찾지 못했습니다.');
           return;
         }
-        state = normalizeImportedState(loadedData);
+        state = normalizeImportedState(pulled.state);
         state.settings.syncCode = rawCode;
-        saveState();
+        state.updatedAt = pulled.updatedAt || new Date().toISOString();
+        saveState({ skipAutoSync: true, touchTimestamp: false });
+        updateSyncHeaderUI('idle');
         renderAll();
-        statusEl.textContent = `클라우드 동기화 완료 · ${new Date().toLocaleTimeString()}`;
+        if (statusEl) {
+          statusEl.textContent = `클라우드 동기화 완료 · ${new Date().toLocaleTimeString()}`;
+        }
         showToast('클라우드에서 최신 일정 · 루틴 · 타임트래커 데이터를 불러왔습니다!');
       }
     } catch (_) {
-      statusEl.textContent = '네트워크 상태를 확인한 뒤 다시 시도해 주세요.';
+      updateSyncHeaderUI('error');
+      if (statusEl) {
+        statusEl.textContent = '네트워크 상태를 확인한 뒤 다시 시도해 주세요.';
+      }
       showToast('클라우드 동기화 중 일시적인 통신 오류가 발생했습니다.');
     }
   }
@@ -4852,7 +5544,7 @@
     showToast(`캘린더 가져오기 완료 · ${summaryMsg}`);
   }
 
-  // -------------------- 예시 기록 풍부하게 채우기 (타임트래커 분석 체험용) --------------------
+  // -------------------- 예시 기록 풍부하게 채우기 & 데이터 정리 --------------------
   function populateRichSampleReportLogs() {
     const today = getTodayStr();
     const sampleItems = [
@@ -4868,6 +5560,7 @@
       { daysAgo: 5, title: '충전 및 영화 감상', start: '20:00', end: '22:00', cat: 'cat_rest' }
     ];
 
+    pushUndoSnapshot('예시 기록 추가');
     let addedCount = 0;
     sampleItems.forEach(item => {
       const dStr = addDaysStr(today, -item.daysAgo);
@@ -4904,13 +5597,246 @@
     });
 
     if (addedCount === 0) {
+      undoStack.pop();
       showToast('이미 이번 달 타임트래커 예시 기록이 반영되어 있습니다.');
       return;
     }
 
     saveState();
     renderAll();
-    showToast(`이번 달 타임트래커 예시 기록 ${addedCount}건이 추가되어 분석 차트가 업데이트되었습니다.`);
+    showToast(`이번 달 타임트래커 예시 기록 ${addedCount}건이 추가되었습니다.`, { withUndo: true });
+  }
+
+  function clearSampleDataOnly() {
+    const hasSampleSch = state.schedules.some(
+      s => SAMPLE_ITEM_IDS.has(s.id) || SAMPLE_REPORT_TITLES.has(s.title)
+    );
+    const hasSampleAct = state.actualLogs.some(
+      a => SAMPLE_ITEM_IDS.has(a.id) || SAMPLE_REPORT_TITLES.has(a.title)
+    );
+    const hasSampleTodo = state.todos.some(t => SAMPLE_ITEM_IDS.has(t.id));
+
+    if (!hasSampleSch && !hasSampleAct && !hasSampleTodo) {
+      showToast('비울 수 있는 초기 예시 항목이 없습니다.');
+      return;
+    }
+
+    pushUndoSnapshot('예시 데이터 비우기');
+    const prevCount = state.schedules.length + state.actualLogs.length + state.todos.length;
+    state.schedules = state.schedules.filter(
+      s => !SAMPLE_ITEM_IDS.has(s.id) && !SAMPLE_REPORT_TITLES.has(s.title)
+    );
+    state.actualLogs = state.actualLogs.filter(
+      a => !SAMPLE_ITEM_IDS.has(a.id) && !SAMPLE_REPORT_TITLES.has(a.title)
+    );
+    state.todos = state.todos.filter(t => !SAMPLE_ITEM_IDS.has(t.id));
+    const removed = prevCount - (state.schedules.length + state.actualLogs.length + state.todos.length);
+
+    if (selectedProjectTag) {
+      const stillHasTag =
+        state.schedules.some(s => cleanProjectTag(s.projectTag) === selectedProjectTag) ||
+        state.todos.some(t => cleanProjectTag(t.projectTag) === selectedProjectTag) ||
+        state.actualLogs.some(a => cleanProjectTag(a.projectTag) === selectedProjectTag);
+      if (!stillHasTag) selectedProjectTag = '';
+    }
+
+    saveState();
+    renderAll();
+    document.getElementById('syncModal')?.classList.add('hidden');
+    showToast(`초기 예시 항목 ${removed}건을 비웠습니다.`, { withUndo: true });
+  }
+
+  function clearAllRecordsWithConfirm() {
+    const totalCount = state.schedules.length + state.actualLogs.length + state.todos.length;
+    if (totalCount === 0) {
+      showToast('초기화할 일정이나 기록이 없습니다.');
+      return;
+    }
+    const ok = window.confirm('카테고리와 루틴 설정은 유지하고 모든 일정, 할 일, 실제 기록을 비우시겠습니까?');
+    if (!ok) return;
+
+    pushUndoSnapshot('전체 기록 초기화');
+    state.schedules = [];
+    state.actualLogs = [];
+    state.todos = [];
+    selectedProjectTag = '';
+
+    saveState();
+    renderAll();
+    document.getElementById('syncModal')?.classList.add('hidden');
+    showToast('모든 일정, 할 일, 진행 기록이 초기화되었습니다.', { withUndo: true });
+  }
+
+  // -------------------- 다크 모드 테마 & 통합 검색 --------------------
+  function applyThemeUI() {
+    const isDark = Boolean(state.settings && state.settings.darkMode);
+    document.documentElement.setAttribute('data-theme', isDark ? 'dark' : 'light');
+    const btn = document.getElementById('themeToggleBtn');
+    const label = document.getElementById('themeToggleLabel');
+    if (btn) btn.classList.toggle('active', isDark);
+    if (label) label.textContent = isDark ? '라이트 모드' : '다크 모드';
+  }
+
+  function openGlobalSearchModal() {
+    const modal = document.getElementById('searchModal');
+    const inp = document.getElementById('globalSearchInput');
+    if (!modal) return;
+    modal.classList.remove('hidden');
+    renderGlobalSearchResults();
+    setTimeout(() => inp?.focus(), 40);
+  }
+
+  function renderGlobalSearchResults() {
+    const container = document.getElementById('globalSearchResults');
+    const inp = document.getElementById('globalSearchInput');
+    if (!container) return;
+
+    const rawQuery = String(inp?.value || '').trim().toLowerCase();
+    const cleanQuery = rawQuery.replace(/^[@#]+/, '');
+    const results = [];
+
+    const matchesQuery = (title, tag, catName) => {
+      if (!cleanQuery) return true;
+      return (
+        String(title || '').toLowerCase().includes(cleanQuery) ||
+        String(tag || '').toLowerCase().includes(cleanQuery) ||
+        String(catName || '').toLowerCase().includes(cleanQuery)
+      );
+    };
+
+    if (currentSearchTypeFilter === 'all' || currentSearchTypeFilter === 'schedule') {
+      state.schedules.forEach(s => {
+        const cat = getCategoryById(s.categoryId);
+        const tag = cleanProjectTag(s.projectTag);
+        if (!matchesQuery(s.title, tag, cat.name)) return;
+        results.push({
+          kind: 'schedule',
+          badgeText: '계획 일정',
+          badgeCls: 'plan',
+          title: s.title,
+          dateStr: s.date || getTodayStr(),
+          subText: `${s.date || '날짜 미정'} · ${s.startTime}~${s.endTime}${s.repeat && s.repeat !== 'none' ? ` · ${getRepeatLabelKo(s.repeat, s.date)}` : ''} · ${cat.name}`,
+          projectTag: tag,
+          color: cat.color,
+          rawItem: s
+        });
+      });
+    }
+
+    if (currentSearchTypeFilter === 'all' || currentSearchTypeFilter === 'todo') {
+      state.todos.forEach(t => {
+        const cat = getCategoryById(t.categoryId);
+        const tag = cleanProjectTag(t.projectTag);
+        if (!matchesQuery(t.title, tag, cat.name)) return;
+        results.push({
+          kind: 'todo',
+          badgeText: '할 일',
+          badgeCls: 'deadline',
+          title: t.title,
+          dateStr: t.dueDate || getTodayStr(),
+          subText: `${t.dueDate ? `마감 ${t.dueDate}` : '기한 자유'}${t.repeat && t.repeat !== 'none' ? ` · ${getRepeatLabelKo(t.repeat, t.dueDate)}` : ''} · ${cat.name}`,
+          projectTag: tag,
+          color: cat.color,
+          rawItem: t
+        });
+      });
+    }
+
+    if (currentSearchTypeFilter === 'all' || currentSearchTypeFilter === 'actual') {
+      state.actualLogs.forEach(a => {
+        const cat = getCategoryById(a.categoryId);
+        const tag = cleanProjectTag(a.projectTag);
+        if (!matchesQuery(a.title, tag, cat.name)) return;
+        results.push({
+          kind: 'actual',
+          badgeText: '실제 기록',
+          badgeCls: 'actual',
+          title: a.title,
+          dateStr: a.date || getTodayStr(),
+          subText: `${a.date} · ${a.startTime}~${a.endTime} · ${formatDurationKo(durationMinutes(a.startTime, a.endTime))} · ${cat.name}`,
+          projectTag: tag,
+          color: cat.color,
+          rawItem: a
+        });
+      });
+    }
+
+    if (currentSearchTypeFilter === 'all' || currentSearchTypeFilter === 'routine') {
+      state.routines.forEach(r => {
+        const cat = getCategoryById(r.categoryId);
+        const stepJoined = (r.steps || []).map(st => st.title).join(' ');
+        if (cleanQuery && !matchesQuery(`${r.name} ${stepJoined}`, '', cat.name)) return;
+        const totalMin = (r.steps || []).reduce((acc, st) => acc + Number(st.minutes || 0), 0);
+        results.push({
+          kind: 'routine',
+          badgeText: '루틴',
+          badgeCls: 'plan',
+          title: r.name,
+          dateStr: getTodayStr(),
+          subText: `${r.startTime || '07:00'} 시작 · ${getRoutineDaysLabelKo(r)} · 총 ${totalMin}분 · ${cat.name}`,
+          projectTag: '',
+          color: cat.color,
+          rawItem: r
+        });
+      });
+    }
+
+    results.sort((a, b) => String(b.dateStr || '').localeCompare(String(a.dateStr || '')));
+    const sliced = results.slice(0, 45);
+
+    container.innerHTML = '';
+    if (sliced.length === 0) {
+      container.innerHTML = '<p class="empty-guide">조건에 일치하는 항목이 없습니다.</p>';
+      return;
+    }
+
+    sliced.forEach(entry => {
+      const card = document.createElement('div');
+      card.className = 'search-result-card';
+      const tagBadge = entry.projectTag ? `<span class="project-tag-pill">@${escapeHtml(entry.projectTag)}</span>` : '';
+      const actionPrimaryLabel = entry.kind === 'routine' ? '루틴 시작' : '날짜 이동';
+      const actionSecondaryLabel = entry.kind === 'routine' ? '루틴 편집' : '상세 편집';
+
+      card.innerHTML = `
+        <div class="sr-left">
+          <div class="sr-badges">
+            <span class="wk-type-tag ${entry.badgeCls}">${entry.badgeText}</span>
+            ${tagBadge}
+          </div>
+          <div class="sr-title">${escapeHtml(entry.title)}</div>
+          <div class="sr-sub">${escapeHtml(entry.subText)}</div>
+        </div>
+        <div class="sr-actions">
+          <button type="button" class="btn-xs btn-outline sr-go-btn">${actionPrimaryLabel}</button>
+          <button type="button" class="btn-xs btn-primary sr-edit-btn">${actionSecondaryLabel}</button>
+        </div>
+      `;
+
+      card.querySelector('.sr-go-btn').addEventListener('click', () => {
+        document.getElementById('searchModal')?.classList.add('hidden');
+        if (entry.kind === 'routine') {
+          switchTab('routines');
+          startRoutinePlayer(entry.rawItem.id);
+        } else {
+          selectedDate = entry.dateStr || getTodayStr();
+          dashScope = 'day';
+          syncCalCursorsToSelectedDate(true);
+          switchTab('dashboard');
+          renderAll();
+        }
+      });
+
+      card.querySelector('.sr-edit-btn').addEventListener('click', () => {
+        document.getElementById('searchModal')?.classList.add('hidden');
+        if (entry.kind === 'routine') {
+          openRoutineModalForEdit(entry.rawItem);
+        } else {
+          openItemModalForEdit(entry.kind, entry.rawItem);
+        }
+      });
+
+      container.appendChild(card);
+    });
   }
 
   // -------------------- 탭 전환 및 유틸리티 --------------------
@@ -4921,6 +5847,9 @@
     document.querySelectorAll('.tab-view').forEach(sec => {
       sec.classList.toggle('active', sec.id === `tab-${tabName}`);
     });
+    if (window.innerWidth <= 768) {
+      window.scrollTo({ top: 0, behavior: 'smooth' });
+    }
   }
 
   function updateTtsButtonUI() {
@@ -4947,6 +5876,25 @@
         switchTab(btn.dataset.tab);
         renderAll();
       });
+    });
+
+    // 통합 검색 모달 & 다크 모드 토글
+    document.getElementById('openSearchModalBtn')?.addEventListener('click', openGlobalSearchModal);
+    document.getElementById('globalSearchInput')?.addEventListener('input', renderGlobalSearchResults);
+    document.querySelectorAll('#globalSearchTypeTabs [data-stype]').forEach(btn => {
+      btn.addEventListener('click', () => {
+        document.querySelectorAll('#globalSearchTypeTabs .filter-pill').forEach(b => b.classList.remove('active'));
+        btn.classList.add('active');
+        currentSearchTypeFilter = btn.dataset.stype || 'all';
+        renderGlobalSearchResults();
+      });
+    });
+
+    document.getElementById('themeToggleBtn')?.addEventListener('click', () => {
+      state.settings.darkMode = !state.settings.darkMode;
+      saveState();
+      applyThemeUI();
+      showToast(state.settings.darkMode ? '다크 모드가 적용되었습니다.' : '라이트 모드가 적용되었습니다.');
     });
 
     // 상단 음성 안내 토글
@@ -5113,6 +6061,30 @@
       toggleItemModalTimeVisibility(e.target.value);
     });
 
+    // 항목 모달 내 빠른 시간·날짜 이동 버튼
+    const shiftModalTimeInputs = deltaMinutes => {
+      const startEl = document.getElementById('itemModalStartTime');
+      const endEl = document.getElementById('itemModalEndTime');
+      if (!startEl || !endEl) return;
+      const curStart = timeToMinutes(startEl.value || '09:00');
+      const curEnd = timeToMinutes(endEl.value || '10:00');
+      const dur = Math.max(15, curEnd - curStart);
+      const nextStart = Math.max(0, Math.min(23 * 60 + 45 - dur, curStart + deltaMinutes));
+      const nextEnd = Math.min(23 * 60 + 59, nextStart + dur);
+      startEl.value = minutesToTime(nextStart);
+      endEl.value = minutesToTime(nextEnd);
+    };
+
+    document.getElementById('shiftTimeBack30Btn')?.addEventListener('click', () => shiftModalTimeInputs(-30));
+    document.getElementById('shiftTimeFwd30Btn')?.addEventListener('click', () => shiftModalTimeInputs(30));
+    document.getElementById('shiftTimeFwd60Btn')?.addEventListener('click', () => shiftModalTimeInputs(60));
+    document.getElementById('shiftDateNextDayBtn')?.addEventListener('click', () => {
+      const dateEl = document.getElementById('itemModalDate');
+      if (!dateEl) return;
+      dateEl.value = addDaysStr(dateEl.value || selectedDate, 1);
+      showToast(`기준 날짜가 ${dateEl.value}로 변경되었습니다.`);
+    });
+
     // 항목 저장 및 삭제
     document.getElementById('itemModalForm').addEventListener('submit', e => {
       e.preventDefault();
@@ -5127,6 +6099,7 @@
       let endTime = document.getElementById('itemModalEndTime').value || '10:00';
       const alarm = document.getElementById('itemModalAlarm').checked;
       const important = document.getElementById('itemModalImportant').checked;
+      const alarmLeadMinutes = Number(document.getElementById('itemModalAlarmLead')?.value || 0);
 
       // 종료 시각이 시작 시각보다 빠르거나 같을 경우 자동으로 30분 뒤로 보정
       if (type !== 'todo' && timeToMinutes(endTime) <= timeToMinutes(startTime)) {
@@ -5167,6 +6140,7 @@
           repeat,
           completedDates: prevCompletedDates,
           alarm,
+          alarmLeadMinutes,
           important,
           completed: prevCompleted
         });
@@ -5204,13 +6178,14 @@
     document.getElementById('itemModalDeleteBtn').addEventListener('click', () => {
       const id = document.getElementById('itemModalId').value;
       if (!id) return;
+      pushUndoSnapshot('항목 삭제');
       state.schedules = state.schedules.filter(x => x.id !== id);
       state.actualLogs = state.actualLogs.filter(x => x.id !== id);
       state.todos = state.todos.filter(x => x.id !== id);
       document.getElementById('itemModal').classList.add('hidden');
       saveState();
       renderAll();
-      showToast('항목이 삭제되었습니다.');
+      showToast('항목이 삭제되었습니다.', { withUndo: true });
     });
 
     document.getElementById('itemModalGcalBtn')?.addEventListener('click', openGoogleCalendarFromModal);
@@ -5225,6 +6200,7 @@
     document.getElementById('stopLiveTrackerBtn').addEventListener('click', stopLiveTrackerAndRecord);
 
     // 루티너리 플레이어 컨트롤 버튼
+    document.getElementById('playerPrevStepBtn')?.addEventListener('click', goToPreviousRoutineStep);
     document.getElementById('playerCompleteStepBtn').addEventListener('click', () => completeCurrentRoutineStep(false));
     document.getElementById('playerSkipStepBtn').addEventListener('click', () => completeCurrentRoutineStep(true));
     document.getElementById('playerAdd5MinBtn').addEventListener('click', () => {
@@ -5235,9 +6211,7 @@
       showToast('현재 행동 목표 시간을 5분 연장했습니다.');
     });
     document.getElementById('playerPauseResumeBtn').addEventListener('click', () => {
-      if (!routinePlayer.running) return;
-      routinePlayer.paused = !routinePlayer.paused;
-      updateRoutinePlayerUI();
+      toggleRoutinePlayerPause();
     });
     document.getElementById('playerStopRoutineBtn').addEventListener('click', stopRoutinePlayerEarly);
 
@@ -5248,8 +6222,7 @@
     });
     document.getElementById('bannerPauseBtn').addEventListener('click', () => {
       if (routinePlayer.running) {
-        routinePlayer.paused = !routinePlayer.paused;
-        updateRoutinePlayerUI();
+        toggleRoutinePlayerPause();
       }
     });
     document.getElementById('bannerGoPlayerBtn').addEventListener('click', () => {
@@ -5263,6 +6236,28 @@
     document.getElementById('aiGenerateRoutineBtn').addEventListener('click', handleAiGenerateRoutine);
     document.getElementById('addRoutineStepRowBtn').addEventListener('click', () => appendRoutineStepEditorRow('', 5, ''));
 
+    // 루틴 요일 선택 및 프리셋 버튼
+    document.querySelectorAll('#routineActiveDaysGroup .day-toggle-btn').forEach(btn => {
+      btn.addEventListener('click', () => {
+        btn.classList.toggle('active');
+      });
+    });
+
+    document.querySelectorAll('.routine-day-preset').forEach(presetBtn => {
+      presetBtn.addEventListener('click', () => {
+        const preset = presetBtn.dataset.preset;
+        const targetSet =
+          preset === 'weekdays'
+            ? new Set([1, 2, 3, 4, 5])
+            : preset === 'weekend'
+            ? new Set([0, 6])
+            : new Set([0, 1, 2, 3, 4, 5, 6]);
+        document.querySelectorAll('#routineActiveDaysGroup .day-toggle-btn').forEach(btn => {
+          btn.classList.toggle('active', targetSet.has(Number(btn.dataset.dow)));
+        });
+      });
+    });
+
     document.getElementById('routineModalForm').addEventListener('submit', e => {
       e.preventDefault();
       const id = document.getElementById('routineModalId').value;
@@ -5270,6 +6265,14 @@
       const categoryId = document.getElementById('routineModalCategory').value;
       const startTime = document.getElementById('routineModalTime').value || '07:00';
       const alarm = document.getElementById('routineModalAlarm').checked;
+      const alarmLeadMinutes = Number(document.getElementById('routineModalAlarmLead')?.value || 0);
+
+      let activeDays = Array.from(document.querySelectorAll('#routineActiveDaysGroup .day-toggle-btn.active'))
+        .map(btn => Number(btn.dataset.dow))
+        .sort((a, b) => a - b);
+      if (activeDays.length === 0) {
+        activeDays = [0, 1, 2, 3, 4, 5, 6];
+      }
 
       const stepRows = document.querySelectorAll('#routineStepRowsContainer .step-edit-row');
       const steps = Array.from(stepRows)
@@ -5288,6 +6291,8 @@
           target.categoryId = categoryId;
           target.startTime = startTime;
           target.alarm = alarm;
+          target.alarmLeadMinutes = alarmLeadMinutes;
+          target.activeDays = activeDays;
           target.steps = steps.length > 0 ? steps : [{ id: uid('st'), title: '핵심 행동', minutes: 5, tip: '' }];
           if (routinePlayer.activeRoutineId === id && routinePlayer.stepIndex >= target.steps.length) {
             routinePlayer.stepIndex = Math.max(0, target.steps.length - 1);
@@ -5300,6 +6305,8 @@
           categoryId,
           startTime,
           alarm,
+          alarmLeadMinutes,
+          activeDays,
           completedDates: [],
           steps: steps.length > 0 ? steps : [{ id: uid('st'), title: '핵심 행동', minutes: 5, tip: '' }]
         });
@@ -5314,6 +6321,7 @@
     document.getElementById('routineModalDeleteBtn').addEventListener('click', () => {
       const id = document.getElementById('routineModalId').value;
       if (!id) return;
+      pushUndoSnapshot('루틴 삭제');
       if (routinePlayer.running && routinePlayer.activeRoutineId === id) {
         stopRoutinePlayerEarly();
       }
@@ -5321,7 +6329,7 @@
       document.getElementById('routineModal').classList.add('hidden');
       saveState();
       renderAll();
-      showToast('루틴이 삭제되었습니다.');
+      showToast('루틴이 삭제되었습니다.', { withUndo: true });
     });
 
     // 탭 3: 주간·월간 달력 네비게이션 및 보기 옵션
@@ -5520,10 +6528,22 @@
     // 동기화 및 백업 모달
     document.getElementById('openSyncModalBtn').addEventListener('click', () => {
       document.getElementById('cloudSyncCodeInput').value = state.settings.syncCode || '';
+      const autoCheck = document.getElementById('autoSyncToggleCheck');
+      if (autoCheck) autoCheck.checked = state.settings.autoSync !== false;
       document.getElementById('syncModal').classList.remove('hidden');
     });
     document.getElementById('cloudSaveBtn').addEventListener('click', () => syncToCloud('save'));
     document.getElementById('cloudLoadBtn').addEventListener('click', () => syncToCloud('load'));
+
+    document.getElementById('autoSyncToggleCheck')?.addEventListener('change', e => {
+      state.settings.autoSync = Boolean(e.target.checked);
+      saveState({ skipAutoSync: !state.settings.autoSync });
+      updateSyncHeaderUI('idle');
+      showToast(state.settings.autoSync ? '자동 클라우드 동기화가 켜졌습니다.' : '자동 클라우드 동기화가 꺼졌습니다.');
+    });
+
+    document.getElementById('clearSampleDataBtn')?.addEventListener('click', clearSampleDataOnly);
+    document.getElementById('clearAllRecordsBtn')?.addEventListener('click', clearAllRecordsWithConfirm);
 
     document.getElementById('exportIcsBtn')?.addEventListener('click', exportCalendarIcsFile);
     document.getElementById('importIcsInput')?.addEventListener('change', e => {
@@ -5560,11 +6580,12 @@
       reader.onload = ev => {
         try {
           const imported = JSON.parse(String(ev.target.result));
+          pushUndoSnapshot('백업 불러오기');
           state = normalizeImportedState(imported);
           saveState();
           renderAll();
           document.getElementById('syncModal').classList.add('hidden');
-          showToast('백업 파일을 성공적으로 불러왔습니다!');
+          showToast('백업 파일을 성공적으로 불러왔습니다!', { withUndo: true });
         } catch (_) {
           showToast('유효한 JSON 백업 파일이 아닙니다.');
         } finally {
@@ -5574,7 +6595,9 @@
       reader.readAsText(file);
     });
 
-    // 공통 모달 닫기 버튼 + 배경 클릭 및 Escape 키 닫기 지원
+    // 공통 모달 닫기 버튼 + 배경 클릭 및 단축키 지원
+    const closableModalIds = ['itemModal', 'routineModal', 'categoryModal', 'syncModal', 'searchModal'];
+
     document.querySelectorAll('[data-close]').forEach(btn => {
       btn.addEventListener('click', () => {
         const targetId = btn.dataset.close;
@@ -5582,7 +6605,7 @@
       });
     });
 
-    ['itemModal', 'routineModal', 'categoryModal', 'syncModal'].forEach(modalId => {
+    closableModalIds.forEach(modalId => {
       const backdropEl = document.getElementById(modalId);
       backdropEl?.addEventListener('click', e => {
         if (e.target === backdropEl) {
@@ -5593,19 +6616,66 @@
 
     document.addEventListener('keydown', e => {
       if (e.key === 'Escape') {
-        ['itemModal', 'routineModal', 'categoryModal', 'syncModal'].forEach(modalId => {
+        closableModalIds.forEach(modalId => {
           document.getElementById(modalId)?.classList.add('hidden');
         });
+        return;
+      }
+
+      if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'k') {
+        e.preventDefault();
+        openGlobalSearchModal();
+        return;
+      }
+
+      if ((e.ctrlKey || e.metaKey) && !e.shiftKey && e.key.toLowerCase() === 'z') {
+        const activeTag = (document.activeElement?.tagName || '').toUpperCase();
+        const isTyping =
+          activeTag === 'INPUT' ||
+          activeTag === 'TEXTAREA' ||
+          activeTag === 'SELECT' ||
+          document.activeElement?.isContentEditable;
+        if (!isTyping && undoStack.length > 0) {
+          e.preventDefault();
+          performUndo();
+        }
       }
     });
   }
 
+  // -------------------- 절전 복귀 및 백그라운드 깨어남 동기화 --------------------
+  function handleAppWakeup() {
+    if (liveTracker.running && liveTracker.startTimestamp) {
+      liveTracker.elapsedSeconds = Math.floor((Date.now() - liveTracker.startTimestamp) / 1000);
+      updateLiveTrackerClockUI();
+      updateTopBannerUI();
+    }
+    if (routinePlayer.running && !routinePlayer.paused) {
+      tickRoutinePlayer();
+    }
+    checkScheduledAlarms();
+    if (Date.now() - lastAutoCloudPullAt > 45000) {
+      checkCloudLatestOnStartup(true);
+    }
+  }
+
   // -------------------- 초기화 실행 --------------------
   function init() {
+    applyThemeUI();
     bindEvents();
     renderAll();
-    // 매 15초마다 정각 알람 체크
+    checkScheduledAlarms();
+    checkCloudLatestOnStartup(true);
+
+    // 매 15초마다 정각 및 사전 예고 알람 체크
     setInterval(checkScheduledAlarms, 15000);
+
+    document.addEventListener('visibilitychange', () => {
+      if (document.visibilityState === 'visible') {
+        handleAppWakeup();
+      }
+    });
+    window.addEventListener('focus', handleAppWakeup);
   }
 
   if (document.readyState === 'loading') {
