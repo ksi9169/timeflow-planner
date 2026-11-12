@@ -733,6 +733,7 @@
   let todoGroupByTag = true;
   let currentSearchTypeFilter = 'all';
   let currentActiveTab = 'dashboard';
+  let selectedPreviewRoutineId = '';
 
   function getActiveRealProjectTag() {
     return selectedProjectTag && selectedProjectTag !== '__UNTAGGED__'
@@ -2196,7 +2197,8 @@
         if (cleanProjectTag(s.projectTag) !== tag) return false;
         if (currentTodoFilter === 'recurring') return s.repeat && s.repeat !== 'none';
         if (currentTodoFilter === 'done') return isItemCompletedOnDate(s, selectedDate);
-        return (s.repeat && s.repeat !== 'none') || doesItemOccurOnDate(s, selectedDate, false);
+        if (currentTodoFilter === 'today') return doesItemOccurOnDate(s, selectedDate, false);
+        return false;
       });
 
       if (groupTodos.length === 0 && tagSchedules.length === 0) return;
@@ -2216,7 +2218,7 @@
       head.innerHTML = `
         <div class="pg-head-left">
           <span class="pg-tag-badge">@${escapeHtml(tag)}</span>
-          <span class="pg-meta-stats">할 일 ${doneTagTodos}/${allTagTodos.length}${tagActualMins > 0 ? ` · 투입 ${formatDurationKo(tagActualMins)}` : ''}</span>
+          <span class="pg-meta-stats">할 일 ${doneTagTodos}/${allTagTodos.length}${tagActualMins > 0 ? ` · ${formatShortDurationKo(tagActualMins)}` : ''}</span>
         </div>
         <div class="pg-head-right">
           <button type="button" class="pg-quick-add-btn pg-add-todo-btn" title="이 프로젝트 태그로 할 일 추가">+ 할 일</button>
@@ -2742,7 +2744,24 @@
   }
 
   // -------------------- 탭 2: 루티너리 몰입형 플레이어 엔진 --------------------
+  function getTargetRoutineForPlayer() {
+    if (routinePlayer.running && routinePlayer.activeRoutineId) {
+      const activeRtn = state.routines.find(r => r.id === routinePlayer.activeRoutineId);
+      if (activeRtn) return activeRtn;
+    }
+    if (selectedPreviewRoutineId) {
+      const previewRtn = state.routines.find(r => r.id === selectedPreviewRoutineId);
+      if (previewRtn) return previewRtn;
+    }
+    return state.routines[0] || null;
+  }
+
   function renderRoutinePlayerTab() {
+    const targetRtn = getTargetRoutineForPlayer();
+    if (targetRtn) {
+      selectedPreviewRoutineId = targetRtn.id;
+    }
+
     const listEl = document.getElementById('studioRoutineList');
     if (listEl) {
       listEl.innerHTML = '';
@@ -2750,12 +2769,24 @@
         const cat = getCategoryById(rtn.categoryId);
         const totalMins = rtn.steps.reduce((acc, s) => acc + Number(s.minutes || 0), 0);
         const daysLabel = getRoutineDaysLabelKo(rtn);
+        const isRunningThis = routinePlayer.running && routinePlayer.activeRoutineId === rtn.id;
+        const isSelectedThis = targetRtn && targetRtn.id === rtn.id;
+
         const card = document.createElement('div');
-        card.className = 'routine-mini-card';
+        card.className = `routine-mini-card ${isSelectedThis ? 'is-selected' : ''} ${isRunningThis ? 'is-running' : ''}`;
         card.innerHTML = `
           <div class="rmc-top">
             <span class="rmc-title">${escapeHtml(rtn.name)}</span>
-            <span class="cat-dot-tag" style="background:${cat.color}20;color:${cat.color}">${escapeHtml(cat.name)}</span>
+            <div class="rmc-top-badges">
+              ${
+                isRunningThis
+                  ? '<span class="rmc-state-pill running">실행 중</span>'
+                  : isSelectedThis
+                  ? '<span class="rmc-state-pill selected">선택됨</span>'
+                  : ''
+              }
+              <span class="cat-dot-tag" style="background:${cat.color}20;color:${cat.color}">${escapeHtml(cat.name)}</span>
+            </div>
           </div>
           <div class="rmc-meta">${escapeHtml(daysLabel)} · ${rtn.startTime} · 총 ${totalMins}분 · ${rtn.steps.length}단계</div>
           <details class="rmc-steps-details">
@@ -2765,15 +2796,39 @@
             </div>
           </details>
           <div class="rmc-foot">
-            <button type="button" class="btn-xs btn-outline studio-edit-btn">편집</button>
-            <button type="button" class="btn-xs btn-primary studio-start-btn">루틴 시작</button>
+            <div class="rmc-foot-left">
+              <button type="button" class="btn-xs ${isSelectedThis ? 'btn-teal' : 'btn-outline'} studio-select-btn">${isSelectedThis ? '선택됨' : '선택'}</button>
+              <button type="button" class="btn-xs btn-outline studio-edit-btn">편집</button>
+            </div>
+            <button type="button" class="btn-xs btn-primary studio-start-btn">${isRunningThis ? '진행 중' : '루틴 시작'}</button>
           </div>
         `;
-        card.querySelector('.studio-start-btn').addEventListener('click', () => {
-          startRoutinePlayer(rtn.id);
+        card.querySelector('.studio-select-btn').addEventListener('click', e => {
+          e.stopPropagation();
+          selectedPreviewRoutineId = rtn.id;
+          if (routinePlayer.running && routinePlayer.activeRoutineId !== rtn.id) {
+            startRoutinePlayer(rtn.id);
+          }
+          renderRoutinePlayerTab();
         });
-        card.querySelector('.studio-edit-btn').addEventListener('click', () => {
+        card.querySelector('.studio-start-btn').addEventListener('click', e => {
+          e.stopPropagation();
+          selectedPreviewRoutineId = rtn.id;
+          startRoutinePlayer(rtn.id);
+          renderRoutinePlayerTab();
+        });
+        card.querySelector('.studio-edit-btn').addEventListener('click', e => {
+          e.stopPropagation();
+          selectedPreviewRoutineId = rtn.id;
           openRoutineModalForEdit(rtn);
+        });
+        card.addEventListener('click', e => {
+          if (e.target.closest('button') || e.target.closest('summary')) return;
+          selectedPreviewRoutineId = rtn.id;
+          if (routinePlayer.running && routinePlayer.activeRoutineId !== rtn.id) {
+            startRoutinePlayer(rtn.id);
+          }
+          renderRoutinePlayerTab();
         });
         listEl.appendChild(card);
       });
@@ -2819,6 +2874,7 @@
 
     clearInterval(routinePlayer.intervalId);
     const now = Date.now();
+    selectedPreviewRoutineId = rtn.id;
     routinePlayer.activeRoutineId = rtn.id;
     routinePlayer.running = true;
     routinePlayer.paused = false;
@@ -2967,19 +3023,20 @@
   }
 
   function stopRoutinePlayerEarly() {
+    const prevId = routinePlayer.activeRoutineId;
     clearInterval(routinePlayer.intervalId);
     routinePlayer.running = false;
     routinePlayer.paused = false;
     routinePlayer.activeRoutineId = null;
+    if (prevId) selectedPreviewRoutineId = prevId;
     releaseWakeLock();
-    updateRoutinePlayerUI();
+    renderRoutinePlayerTab();
     updateTopBannerUI();
     showToast('루틴 실행을 종료했습니다.');
   }
 
   function updateRoutinePlayerUI() {
-    const rtn =
-      state.routines.find(r => r.id === routinePlayer.activeRoutineId) || state.routines[0];
+    const rtn = getTargetRoutineForPlayer();
 
     const nameEl = document.getElementById('playerRoutineName');
     const badgeEl = document.getElementById('playerRoutineBadge');
@@ -3030,7 +3087,10 @@
     const isRunning = routinePlayer.running && routinePlayer.activeRoutineId === rtn.id;
     const currentIdx = isRunning ? routinePlayer.stepIndex : 0;
     if (btnPrev) btnPrev.disabled = !isRunning || currentIdx <= 0;
-    btnComplete.disabled = !isRunning;
+    if (btnComplete) {
+      btnComplete.disabled = false;
+      btnComplete.textContent = isRunning ? '다음 단계' : '루틴 시작';
+    }
     btnAdd5.disabled = !isRunning;
     btnPause.disabled = !isRunning;
     btnSkip.disabled = !isRunning;
@@ -3355,15 +3415,13 @@
           renderedCount++;
           const cat = getCategoryById(todo.categoryId);
           const isTodoDone = isItemCompletedOnDate(todo, cell.dateStr);
-          const pTag = cleanProjectTag(todo.projectTag);
           const isRecurring = todo.repeat && todo.repeat !== 'none';
           const pill = document.createElement('div');
           pill.className = `mc-item-pill mc-todo-pill ${isTodoDone ? 'is-done' : ''}`;
           pill.style.borderLeftColor = cat.color;
           pill.innerHTML = `
             <input type="checkbox" class="mc-inline-check" ${isTodoDone ? 'checked' : ''} title="할 일 마감 완료 체크" />
-            <span class="mc-tag-chip deadline">${isRecurring ? '🔁 정기' : '마감'}</span>
-            ${pTag ? `<span class="project-tag-pill">@${escapeHtml(pTag)}</span>` : ''}
+            <span class="mc-tag-chip deadline">${isRecurring ? '정기' : '마감'}</span>
             <span class="mc-item-title">${escapeHtml(todo.title)}</span>
           `;
           pill.querySelector('.mc-inline-check').addEventListener('click', e => {
@@ -3390,15 +3448,13 @@
           renderedCount++;
           const cat = getCategoryById(plan.categoryId);
           const isPlanDone = isItemCompletedOnDate(plan, cell.dateStr);
-          const pTag = cleanProjectTag(plan.projectTag);
           const isRecurring = plan.repeat && plan.repeat !== 'none';
           const pill = document.createElement('div');
           pill.className = `mc-item-pill mc-imp-pill ${isPlanDone ? 'is-done' : ''}`;
           pill.style.background = `${cat.color}18`;
           pill.style.borderLeftColor = cat.color;
           pill.innerHTML = `
-            <span class="mc-tag-chip imp" style="background:${cat.color};color:#FFFFFF;">${isRecurring ? '🔁' : '★'} ${plan.startTime}</span>
-            ${pTag ? `<span class="project-tag-pill">@${escapeHtml(pTag)}</span>` : ''}
+            <span class="mc-tag-chip imp" style="background:${cat.color};color:#FFFFFF;">${isRecurring ? '↻' : '★'} ${plan.startTime}</span>
             <span class="mc-item-title mc-imp-title">${escapeHtml(plan.title)}</span>
           `;
           pill.addEventListener('click', e => {
@@ -3418,14 +3474,12 @@
           renderedCount++;
           const cat = getCategoryById(plan.categoryId);
           const isPlanDone = isItemCompletedOnDate(plan, cell.dateStr);
-          const pTag = cleanProjectTag(plan.projectTag);
           const pill = document.createElement('div');
           pill.className = `mc-item-pill mc-reg-pill ${isPlanDone ? 'is-done' : ''}`;
           pill.style.background = `${cat.color}12`;
           pill.style.borderLeftColor = cat.color;
           pill.innerHTML = `
             <span class="mc-reg-time" style="color:${cat.color}">${plan.startTime}</span>
-            ${pTag ? `<span class="project-tag-pill">@${escapeHtml(pTag)}</span>` : ''}
             <span class="mc-item-title">${escapeHtml(plan.title)}</span>
           `;
           pill.addEventListener('click', e => {
@@ -3563,134 +3617,164 @@
       }
       col.appendChild(statBox);
 
-      const listWrap = document.createElement('div');
-      listWrap.className = 'wk-items-list';
+      const dayBody = document.createElement('div');
+      dayBody.className = 'wk-day-body';
 
-      // 마감 할 일 표시 (계획+실행 또는 계획만 모드일 때)
-      if (showPlan && todos.length > 0) {
-        todos.forEach(todo => {
-          const cat = getCategoryById(todo.categoryId);
-          const isTodoDone = isItemCompletedOnDate(todo, dStr);
-          const pTag = cleanProjectTag(todo.projectTag);
-          const isRecurring = todo.repeat && todo.repeat !== 'none';
-          const tCard = document.createElement('div');
-          tCard.className = `wk-item-card wk-todo-card ${isTodoDone ? 'is-done' : ''}`;
-          tCard.style.borderLeftColor = cat.color;
-          tCard.innerHTML = `
-            <div class="wk-card-top">
-              <label class="wk-check-wrap">
-                <input type="checkbox" class="wk-inline-check" ${isTodoDone ? 'checked' : ''} />
-                <span class="wk-type-tag deadline">${isRecurring ? '반복 마감' : '마감'}</span>
-              </label>
-              ${todo.important ? '<span class="important-star">★</span>' : ''}
-            </div>
-            <div class="wk-card-title">${escapeHtml(todo.title)}</div>
-            ${pTag ? `<div class="wk-card-sub"><span class="project-tag-pill">@${escapeHtml(pTag)}</span></div>` : ''}
-          `;
-          tCard.querySelector('.wk-inline-check').addEventListener('click', e => {
-            e.stopPropagation();
-            pushUndoSnapshot('할 일 완료 상태 변경');
-            setItemCompletedOnDate(todo, dStr, Boolean(e.target.checked));
-            saveState();
-            renderAll();
-          });
-          tCard.addEventListener('click', e => {
-            e.stopPropagation();
-            if (e.target.tagName === 'INPUT' || e.target.closest('label') || isJustDraggedOrResized()) return;
-            openItemModalForEdit('todo', todo);
-          });
-          makeItemDraggable(tCard, 'todo', todo, dStr);
-          listWrap.appendChild(tCard);
+      const createTodoCard = todo => {
+        const cat = getCategoryById(todo.categoryId);
+        const isTodoDone = isItemCompletedOnDate(todo, dStr);
+        const isRecurring = todo.repeat && todo.repeat !== 'none';
+        const tCard = document.createElement('div');
+        tCard.className = `wk-item-card wk-todo-card ${isTodoDone ? 'is-done' : ''}`;
+        tCard.style.borderLeftColor = cat.color;
+        tCard.innerHTML = `
+          <div class="wk-card-top">
+            <label class="wk-check-wrap">
+              <input type="checkbox" class="wk-inline-check" ${isTodoDone ? 'checked' : ''} />
+              <span class="wk-type-tag deadline">${isRecurring ? '정기 마감' : '마감'}</span>
+            </label>
+            ${todo.important ? '<span class="important-star">★</span>' : ''}
+          </div>
+          <div class="wk-card-title">${escapeHtml(todo.title)}</div>
+        `;
+        tCard.querySelector('.wk-inline-check').addEventListener('click', e => {
+          e.stopPropagation();
+          pushUndoSnapshot('할 일 완료 상태 변경');
+          setItemCompletedOnDate(todo, dStr, Boolean(e.target.checked));
+          saveState();
+          renderAll();
         });
-      }
+        tCard.addEventListener('click', e => {
+          e.stopPropagation();
+          if (e.target.tagName === 'INPUT' || e.target.closest('label') || isJustDraggedOrResized()) return;
+          openItemModalForEdit('todo', todo);
+        });
+        makeItemDraggable(tCard, 'todo', todo, dStr);
+        return tCard;
+      };
 
-      // 시간순 통합 카드 목록 (계획 / 실행)
-      const combinedEntries = [];
-      if (showPlan) {
-        plans.forEach(p => combinedEntries.push({ kind: 'plan', time: p.startTime, item: p }));
-      }
-      if (showActual) {
-        actuals.forEach(a => combinedEntries.push({ kind: 'actual', time: a.startTime, item: a }));
-      }
-      combinedEntries.sort((a, b) => {
-        const diff = timeToMinutes(a.time) - timeToMinutes(b.time);
-        if (diff !== 0) return diff;
-        return a.kind === 'plan' ? -1 : 1;
-      });
+      const createPlanCard = item => {
+        const cat = getCategoryById(item.categoryId);
+        const isPlanDone = isItemCompletedOnDate(item, dStr);
+        const isRecurring = item.repeat && item.repeat !== 'none';
+        const card = document.createElement('div');
+        card.className = `wk-item-card wk-plan-card ${isPlanDone ? 'is-done' : ''}`;
+        card.style.borderLeftColor = cat.color;
+        card.innerHTML = `
+          <div class="wk-card-top">
+            <label class="wk-check-wrap" title="완료 체크 시 실행 시간에 자동 반영됩니다">
+              <input type="checkbox" class="wk-inline-check" ${isPlanDone ? 'checked' : ''} />
+              <span class="wk-time-range">${item.startTime}~${item.endTime}</span>
+            </label>
+            <span class="wk-card-flags">
+              ${isRecurring ? '<span class="wk-mini-flag">반복</span>' : ''}
+              ${item.important ? '<span class="important-star">★</span>' : ''}
+            </span>
+          </div>
+          <div class="wk-card-title">${escapeHtml(item.title)}</div>
+        `;
+        card.querySelector('.wk-inline-check').addEventListener('click', e => {
+          e.stopPropagation();
+          toggleScheduleCompletedWithActualSync(item, dStr, Boolean(e.target.checked), true);
+          saveState();
+          renderAll();
+        });
+        card.addEventListener('click', e => {
+          e.stopPropagation();
+          if (e.target.tagName === 'INPUT' || e.target.closest('label') || isJustDraggedOrResized()) return;
+          openItemModalForEdit('schedule', item);
+        });
+        makeItemDraggable(card, 'schedule', item, dStr);
+        return card;
+      };
 
-      if (combinedEntries.length === 0 && (!showPlan || todos.length === 0)) {
-        col.classList.add('is-empty-day');
-        const empty = document.createElement('p');
-        empty.className = 'wk-empty-hint';
-        empty.textContent = '+ 클릭하여 추가';
-        listWrap.appendChild(empty);
-      } else {
-        combinedEntries.forEach(entry => {
-          const item = entry.item;
-          const cat = getCategoryById(item.categoryId);
-          const pTag = cleanProjectTag(item.projectTag);
-          const card = document.createElement('div');
+      const createActualCard = item => {
+        const cat = getCategoryById(item.categoryId);
+        const dur = durationMinutes(item.startTime, item.endTime);
+        const card = document.createElement('div');
+        card.className = 'wk-item-card wk-actual-card';
+        card.style.borderLeftColor = cat.color;
+        card.style.background = `${cat.color}14`;
+        card.innerHTML = `
+          <div class="wk-card-top">
+            <span class="wk-time-range">${item.startTime}~${item.endTime}</span>
+            <span class="wk-dur-label" style="color:${cat.color}">${dur}분</span>
+          </div>
+          <div class="wk-card-title">${escapeHtml(item.title)}</div>
+        `;
+        card.addEventListener('click', e => {
+          e.stopPropagation();
+          if (isJustDraggedOrResized()) return;
+          openItemModalForEdit('actual', item);
+        });
+        makeItemDraggable(card, 'actual', item, dStr);
+        return card;
+      };
 
-          if (entry.kind === 'plan') {
-            const isPlanDone = isItemCompletedOnDate(item, dStr);
-            const isRecurring = item.repeat && item.repeat !== 'none';
-            card.className = `wk-item-card wk-plan-card ${isPlanDone ? 'is-done' : ''}`;
-            card.style.borderLeftColor = cat.color;
-            card.innerHTML = `
-              <div class="wk-card-top">
-                <label class="wk-check-wrap" title="완료 체크 시 실행 시간에 자동 반영됩니다">
-                  <input type="checkbox" class="wk-inline-check" ${isPlanDone ? 'checked' : ''} />
-                  <span class="wk-time-range">${item.startTime}~${item.endTime}</span>
-                </label>
-                <span class="wk-card-flags">
-                  ${isRecurring ? '<span class="wk-mini-flag">반복</span>' : ''}
-                  ${item.important ? '<span class="important-star">★</span>' : ''}
-                </span>
-              </div>
-              <div class="wk-card-title">${escapeHtml(item.title)}</div>
-              ${pTag ? `<div class="wk-card-sub"><span class="project-tag-pill">@${escapeHtml(pTag)}</span></div>` : ''}
-            `;
-            card.querySelector('.wk-inline-check').addEventListener('click', e => {
-              e.stopPropagation();
-              toggleScheduleCompletedWithActualSync(item, dStr, Boolean(e.target.checked), true);
-              saveState();
-              renderAll();
-            });
-            card.addEventListener('click', e => {
-              e.stopPropagation();
-              if (e.target.tagName === 'INPUT' || e.target.closest('label') || isJustDraggedOrResized()) return;
-              openItemModalForEdit('schedule', item);
-            });
-            makeItemDraggable(card, 'schedule', item, dStr);
+      if (mode === 'both') {
+        const hasAny = todos.length > 0 || plans.length > 0 || actuals.length > 0;
+        if (!hasAny) {
+          col.classList.add('is-empty-day');
+          const empty = document.createElement('p');
+          empty.className = 'wk-empty-hint';
+          empty.textContent = '+ 클릭하여 추가';
+          dayBody.appendChild(empty);
+        } else {
+          const splitGrid = document.createElement('div');
+          splitGrid.className = 'wk-dual-split';
+
+          const planCol = document.createElement('div');
+          planCol.className = 'wk-split-col plan-col';
+          makeSlotDroppable(planCol, { targetType: 'schedule', targetDate: dStr });
+          planCol.innerHTML = `<div class="wk-split-head plan">계획 <span>${todos.length + plans.length}</span></div>`;
+          const planList = document.createElement('div');
+          planList.className = 'wk-items-list';
+          if (todos.length === 0 && plans.length === 0) {
+            planList.innerHTML = `<span class="wk-split-empty">없음</span>`;
           } else {
-            const dur = durationMinutes(item.startTime, item.endTime);
-            card.className = 'wk-item-card wk-actual-card';
-            card.style.borderLeftColor = cat.color;
-            card.style.background = `${cat.color}14`;
-            card.innerHTML = `
-              <div class="wk-card-top">
-                <span class="wk-actual-left">
-                  <span class="wk-type-tag actual">실행</span>
-                  <span class="wk-time-range">${item.startTime}~${item.endTime}</span>
-                </span>
-                <span class="wk-dur-label" style="color:${cat.color}">${dur}분</span>
-              </div>
-              <div class="wk-card-title">${escapeHtml(item.title)}</div>
-              ${pTag ? `<div class="wk-card-sub"><span class="project-tag-pill">@${escapeHtml(pTag)}</span></div>` : ''}
-            `;
-            card.addEventListener('click', e => {
-              e.stopPropagation();
-              if (isJustDraggedOrResized()) return;
-              openItemModalForEdit('actual', item);
-            });
-            makeItemDraggable(card, 'actual', item, dStr);
+            todos.forEach(t => planList.appendChild(createTodoCard(t)));
+            plans.forEach(p => planList.appendChild(createPlanCard(p)));
           }
+          planCol.appendChild(planList);
 
-          listWrap.appendChild(card);
-        });
+          const actualCol = document.createElement('div');
+          actualCol.className = 'wk-split-col actual-col';
+          makeSlotDroppable(actualCol, { targetType: 'actual', targetDate: dStr });
+          actualCol.innerHTML = `<div class="wk-split-head actual">실행 <span>${actuals.length}</span></div>`;
+          const actualList = document.createElement('div');
+          actualList.className = 'wk-items-list';
+          if (actuals.length === 0) {
+            actualList.innerHTML = `<span class="wk-split-empty">기록 없음</span>`;
+          } else {
+            actuals.forEach(a => actualList.appendChild(createActualCard(a)));
+          }
+          actualCol.appendChild(actualList);
+
+          splitGrid.appendChild(planCol);
+          splitGrid.appendChild(actualCol);
+          dayBody.appendChild(splitGrid);
+        }
+      } else {
+        const listWrap = document.createElement('div');
+        listWrap.className = 'wk-items-list';
+        if (showPlan) {
+          todos.forEach(t => listWrap.appendChild(createTodoCard(t)));
+          plans.forEach(p => listWrap.appendChild(createPlanCard(p)));
+        }
+        if (showActual) {
+          actuals.forEach(a => listWrap.appendChild(createActualCard(a)));
+        }
+        if (listWrap.children.length === 0) {
+          col.classList.add('is-empty-day');
+          const empty = document.createElement('p');
+          empty.className = 'wk-empty-hint';
+          empty.textContent = '+ 클릭하여 추가';
+          listWrap.appendChild(empty);
+        }
+        dayBody.appendChild(listWrap);
       }
 
-      col.appendChild(listWrap);
+      col.appendChild(dayBody);
 
       col.addEventListener('click', () => {
         selectedDate = dStr;
@@ -3709,6 +3793,39 @@
 
       grid.appendChild(col);
     });
+
+    if (!isCompact) {
+      const rate = totalPlanMins > 0 ? Math.min(999, Math.round((totalActualMins / totalPlanMins) * 100)) : 0;
+      const summaryCol = document.createElement('div');
+      summaryCol.className = 'week-day-col week-summary-card';
+      summaryCol.innerHTML = `
+        <div class="week-day-head">
+          <div class="wk-head-left">
+            <span class="wk-day-title">이번 주 요약</span>
+          </div>
+          <span class="wk-today-pill">7일 합계</span>
+        </div>
+        <div class="wk-summary-metrics">
+          <div class="wk-sum-row">
+            <span class="wk-sum-label">계획 시간</span>
+            <strong class="wk-sum-val plan">${formatShortDurationKo(totalPlanMins)}</strong>
+          </div>
+          <div class="wk-sum-row">
+            <span class="wk-sum-label">실행 시간</span>
+            <strong class="wk-sum-val actual">${formatShortDurationKo(totalActualMins)}</strong>
+          </div>
+          <div class="wk-sum-row">
+            <span class="wk-sum-label">시간 실행률</span>
+            <strong class="wk-sum-val">${rate}%</strong>
+          </div>
+          <div class="wk-sum-row">
+            <span class="wk-sum-label">주간 마감 할 일</span>
+            <strong class="wk-sum-val">${totalTodos}건</strong>
+          </div>
+        </div>
+      `;
+      grid.appendChild(summaryCol);
+    }
 
     return { totalPlanMins, totalActualMins, totalTodos };
   }
@@ -3815,14 +3932,12 @@
           plansInHour.forEach(p => {
             const cat = getCategoryById(p.categoryId);
             const isPlanDone = isItemCompletedOnDate(p, dStr);
-            const pTag = cleanProjectTag(p.projectTag);
             const dur = durationMinutes(p.startTime, p.endTime);
             const chip = document.createElement('div');
             chip.className = `wk-tt-chip plan ${isPlanDone ? 'is-done' : ''}`;
             chip.style.borderLeftColor = cat.color;
             chip.innerHTML = `
-              <span class="wk-tt-chip-tag plan">${p.repeat && p.repeat !== 'none' ? '🔁' : '계획'} ${p.startTime}~${p.endTime} · ${dur}분</span>
-              ${pTag ? `<span class="project-tag-pill">@${escapeHtml(pTag)}</span>` : ''}
+              <span class="wk-tt-chip-tag plan">${p.repeat && p.repeat !== 'none' ? '↻' : '계획'} ${p.startTime}~${p.endTime} · ${dur}분</span>
               <span class="wk-tt-chip-title">${p.important ? '★ ' : ''}${escapeHtml(p.title)}</span>
             `;
             chip.addEventListener('click', e => {
@@ -3834,7 +3949,7 @@
             const tagEl = chip.querySelector('.wk-tt-chip-tag');
             attachDurationResizeHandle(chip, p, (previewEnd, previewDur) => {
               if (tagEl) {
-                tagEl.textContent = `${p.repeat && p.repeat !== 'none' ? '🔁' : '계획'} ${p.startTime}~${previewEnd} · ${previewDur}분`;
+                tagEl.textContent = `${p.repeat && p.repeat !== 'none' ? '↻' : '계획'} ${p.startTime}~${previewEnd} · ${previewDur}분`;
               }
             });
             slot.appendChild(chip);
@@ -3846,14 +3961,12 @@
           actualsInHour.forEach(a => {
             const cat = getCategoryById(a.categoryId);
             const dur = durationMinutes(a.startTime, a.endTime);
-            const aTag = cleanProjectTag(a.projectTag);
             const chip = document.createElement('div');
             chip.className = 'wk-tt-chip actual';
             chip.style.borderLeftColor = cat.color;
             chip.style.background = `${cat.color}18`;
             chip.innerHTML = `
-              <span class="wk-tt-chip-tag actual">진행 ${a.startTime}~${a.endTime} · ${dur}분</span>
-              ${aTag ? `<span class="project-tag-pill">@${escapeHtml(aTag)}</span>` : ''}
+              <span class="wk-tt-chip-tag actual">실행 ${a.startTime}~${a.endTime} · ${dur}분</span>
               <span class="wk-tt-chip-title">${escapeHtml(a.title)}</span>
             `;
             chip.addEventListener('click', e => {
@@ -3865,7 +3978,7 @@
             const tagEl = chip.querySelector('.wk-tt-chip-tag');
             attachDurationResizeHandle(chip, a, (previewEnd, previewDur) => {
               if (tagEl) {
-                tagEl.textContent = `진행 ${a.startTime}~${previewEnd} · ${previewDur}분`;
+                tagEl.textContent = `실행 ${a.startTime}~${previewEnd} · ${previewDur}분`;
               }
             });
             slot.appendChild(chip);
@@ -3975,20 +4088,20 @@
       el.innerHTML = `
         <div class="ms-item-top">
           <div class="ms-badges-left">
-            <span class="ms-type-badge ${item.kind === 'todo' ? 'deadline' : item.important ? 'important' : 'normal'}">
-              ${item.kind === 'todo' ? '할 일 마감' : item.important ? '★ 주요 일정' : '일정'}
-            </span>
+            <span class="ms-type-badge ${item.kind === 'todo' ? 'deadline' : item.important ? 'important' : 'normal'}">${item.kind === 'todo' ? '할 일 마감' : item.important ? '★ 주요 일정' : '일정'}</span>
             <span class="ms-dday-badge ${dday.cls}">${dday.text}</span>
-            ${item.projectTag ? `<span class="project-tag-pill">@${escapeHtml(item.projectTag)}</span>` : ''}
-            ${item.repeatLabel ? `<span class="repeat-badge">${escapeHtml(item.repeatLabel)}</span>` : ''}
           </div>
-          <span class="cat-dot-tag" style="background:${cat.color}20;color:${cat.color}">${escapeHtml(cat.name)}</span>
+          <span class="ms-date-inline">${item.date}${item.kind === 'schedule' ? ` · ${item.time}` : ''}</span>
         </div>
         <div class="ms-item-body">
           <input type="checkbox" class="ms-check" ${item.completed ? 'checked' : ''} title="완료 상태 전환" />
           <div class="ms-title-wrap">
             <div class="ms-title-text">${escapeHtml(item.title)}</div>
-            <div class="ms-date-text">${item.date} · ${item.time}</div>
+            <div class="ms-sub-meta">
+              <span class="ms-cat-chip" style="color:${cat.color}"><i class="ms-cat-dot" style="background:${cat.color}"></i>${escapeHtml(cat.name)}</span>
+              ${item.repeatLabel ? `<span class="ms-meta-sep">·</span><span class="ms-repeat-text">${escapeHtml(item.repeatLabel)}</span>` : ''}
+              ${item.projectTag ? `<span class="ms-meta-sep">·</span><span class="ms-ptag-text">@${escapeHtml(item.projectTag)}</span>` : ''}
+            </div>
           </div>
         </div>
       `;
@@ -5282,15 +5395,19 @@
     const row = document.createElement('div');
     row.className = 'step-edit-row';
     row.innerHTML = `
-      <div class="step-reorder-btns">
-        <button type="button" class="step-move-btn step-up-btn" title="위로 이동">↑</button>
-        <button type="button" class="step-move-btn step-down-btn" title="아래로 이동">↓</button>
+      <div class="step-row-top">
+        <div class="step-reorder-btns">
+          <button type="button" class="step-move-btn step-up-btn" title="위로 이동">↑</button>
+          <button type="button" class="step-move-btn step-down-btn" title="아래로 이동">↓</button>
+        </div>
+        <input type="text" class="step-row-title" placeholder="행동 이름" value="${escapeHtml(title)}" required />
+        <div class="step-mins-wrap">
+          <input type="number" class="step-row-mins" min="1" max="180" value="${Number(minutes || 5)}" title="목표 시간 분 단위" />
+          <span class="step-mins-unit">분</span>
+        </div>
+        <button type="button" class="btn-xs btn-danger-ghost step-row-del" title="단계 삭제">&times;</button>
       </div>
-      <input type="text" class="step-row-title" placeholder="행동 이름" value="${escapeHtml(title)}" required />
-      <input type="number" class="step-row-mins" min="1" max="180" value="${Number(minutes || 5)}" title="목표 시간 분 단위" />
-      <span style="font-size:0.78rem;color:var(--text-sub);">분</span>
-      <input type="text" class="step-row-tip" placeholder="음성 안내 팁" value="${escapeHtml(tip || '')}" />
-      <button type="button" class="btn-xs btn-danger-ghost step-row-del" title="단계 삭제">&times;</button>
+      <input type="text" class="step-row-tip" placeholder="음성 안내 멘트 또는 실천 팁" value="${escapeHtml(tip || '')}" />
     `;
     row.querySelector('.step-up-btn').addEventListener('click', () => {
       const prev = row.previousElementSibling;
@@ -6871,7 +6988,17 @@
 
     // 루티너리 플레이어 컨트롤 버튼
     document.getElementById('playerPrevStepBtn')?.addEventListener('click', goToPreviousRoutineStep);
-    document.getElementById('playerCompleteStepBtn').addEventListener('click', () => completeCurrentRoutineStep(false));
+    document.getElementById('playerCompleteStepBtn').addEventListener('click', () => {
+      if (!routinePlayer.running) {
+        const targetRtn = getTargetRoutineForPlayer();
+        if (targetRtn) {
+          startRoutinePlayer(targetRtn.id);
+          renderRoutinePlayerTab();
+        }
+        return;
+      }
+      completeCurrentRoutineStep(false);
+    });
     document.getElementById('playerSkipStepBtn').addEventListener('click', () => completeCurrentRoutineStep(true));
     document.getElementById('playerAdd5MinBtn').addEventListener('click', () => {
       if (!routinePlayer.running) return;
@@ -6975,8 +7102,9 @@
           }
         }
       } else {
+        const newRtnId = uid('rtn');
         state.routines.push({
-          id: uid('rtn'),
+          id: newRtnId,
           name,
           categoryId,
           startTime,
@@ -6986,6 +7114,7 @@
           completedDates: [],
           steps: steps.length > 0 ? steps : [{ id: uid('st'), title: '핵심 행동', minutes: 5, tip: '' }]
         });
+        selectedPreviewRoutineId = newRtnId;
       }
 
       document.getElementById('routineModal').classList.add('hidden');
