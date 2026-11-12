@@ -2,11 +2,10 @@ const DEFAULT_SUPABASE_URL = 'https://buwyexbkjtnubjjzjgxa.supabase.co';
 const DEFAULT_SUPABASE_KEY = 'sb_publishable_9UEw3qlP8N6mss-ECjYrSA_lVs33DzY';
 
 const MODEL_PRIORITY = [
-  'gemini-3.5-flash-lite',
-  'gemini-3.1-flash-lite-preview',
-  'gemini-3.1-flash-lite',
+  'gemini-2.5-flash-lite',
+  'gemini-2.5-flash',
   'gemini-3-flash-preview',
-  'gemini-2.5-flash'
+  'gemini-3.1-flash-lite-preview'
 ];
 
 // 무료 API 키 한도 소진(429 등) 시 90초간 쿨다운 후 다시 무료 키 1순위로 자동 복귀
@@ -333,11 +332,22 @@ async function handleAiRequest(request, env) {
 
   // 3. 밀린 하루 일정 원클릭 재배치
   if (action === 'reschedule_day') {
-    const { currentTime = '14:00', todayDate = '', schedules = [], todos = [] } = payload;
+    const {
+      currentTime = '14:00',
+      todayDate = '',
+      schedules = [],
+      fixedSchedules = [],
+      todos = []
+    } = payload;
     const prompt = `현재 시각은 ${todayDate} ${currentTime}입니다.
 오늘 남은 시간(${currentTime} ~ 23:00) 동안 아직 완료되지 않은 일정과 할 일을 무리하지 않게 재배치해 주세요.
+고정 일정 구간과는 절대 시간이 겹치지 않도록 피해서 배치하고, 일정 사이에 최소 10~15분 여유를 두세요.
+미완료 할 일도 예상 소요 시간(estimatedMinutes)을 참고해 오늘 빈 시간대에 배치할 수 있으면 rearrangedSchedules에 포함하고(sourceTodoId 기재), 오늘 하기 무리라면 postponedTodoIds에 넣으세요.
 
-[미완료 일정]
+[고정 일정 - 시간 변경 및 겹침 절대 금지]
+${JSON.stringify(fixedSchedules)}
+
+[재배치 대상 미완료 일정]
 ${JSON.stringify(schedules)}
 
 [미완료 할 일]
@@ -347,7 +357,7 @@ ${JSON.stringify(todos)}
 {
   "advice": "남은 하루를 어떻게 운영하는 것이 좋을지 따뜻한 한두 문장 조언",
   "rearrangedSchedules": [
-    { "id": "기존id 또는 new", "title": "제목", "startTime": "HH:MM", "endTime": "HH:MM", "categoryId": "카테고리ID", "important": true }
+    { "id": "기존id 또는 new", "sourceTodoId": "할 일에서 전환된 경우 해당 todo id, 아니면 빈 문자열", "title": "제목", "startTime": "HH:MM", "endTime": "HH:MM", "categoryId": "카테고리ID", "projectTag": "프로젝트태그", "important": true }
   ],
   "postponedTodoIds": ["오늘 하기 어려워 내일로 미루기를 추천하는 할 일 ID 목록"]
 }`;

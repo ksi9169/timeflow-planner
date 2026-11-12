@@ -225,6 +225,7 @@
                 <button type="button" id="prevDayBtn" class="icon-btn" aria-label="이전 날짜">&lsaquo;</button>
                 <label for="quickDatePicker" class="date-picker-trigger" title="날짜 선택">
                   <h2 id="timelineDateTitle" class="panel-title">11월 12일 목요일</h2>
+                  <span id="timelineRelativeBadge" class="date-rel-badge">오늘</span>
                   <input type="date" id="quickDatePicker" class="visually-hidden-date" aria-label="날짜 바로 이동" />
                 </label>
                 <button type="button" id="nextDayBtn" class="icon-btn" aria-label="다음 날짜">&rsaquo;</button>
@@ -416,7 +417,10 @@
                 <button type="button" class="mode-pill-btn" data-monthmode="deadline">할 일 마감</button>
               </div>
             </div>
-            <div id="calMonthSummaryBadges" class="view-mode-summary">주요 일정 0건 · 마감 0건</div>
+            <div class="view-mode-right">
+              <span id="calMonthSummaryBadges" class="view-mode-summary">주요 일정 0건 · 마감 0건</span>
+              <button type="button" class="btn-link-subtle cal-jump-day-btn" title="선택한 날짜의 일별 타임라인으로 이동합니다">일별 타임라인 ▸</button>
+            </div>
           </div>
 
           <!-- 주간 서브 툴바 -->
@@ -433,7 +437,10 @@
                 <button type="button" class="mode-pill-btn" data-weekmode="actual">실행</button>
               </div>
             </div>
-            <div id="calWeekSummaryBadges" class="view-mode-summary">계획 0분 · 실행 0분</div>
+            <div class="view-mode-right">
+              <span id="calWeekSummaryBadges" class="view-mode-summary">계획 0분 · 실행 0분</span>
+              <button type="button" class="btn-link-subtle cal-jump-day-btn" title="선택한 날짜의 일별 타임라인으로 이동합니다">일별 타임라인 ▸</button>
+            </div>
           </div>
 
           <!-- 월간 달력 뷰 -->
@@ -701,6 +708,23 @@
               <option value="weekdays">평일마다 반복</option>
               <option value="monthly">매월 같은 날짜</option>
             </select>
+          </div>
+        </div>
+        <div id="itemModalEstMinutesRow" class="form-row two-col hidden">
+          <div>
+            <label for="itemModalEstMinutes">예상 소요 시간</label>
+            <select id="itemModalEstMinutes">
+              <option value="15">15분</option>
+              <option value="30" selected>30분</option>
+              <option value="45">45분</option>
+              <option value="60">1시간</option>
+              <option value="90">1시간 30분</option>
+              <option value="120">2시간</option>
+            </select>
+          </div>
+          <div class="todo-timeblock-action-col">
+            <label>빠른 일정 전환</label>
+            <button type="button" id="itemModalTimeblockTodoBtn" class="btn-xs btn-outline" title="선택한 날짜의 비어 있는 시간대에 계획 일정으로 바로 배치합니다">타임라인 자동 배치</button>
           </div>
         </div>
         <div id="itemModalTimeRow" class="form-row two-col">
