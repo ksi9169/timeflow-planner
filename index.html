@@ -481,6 +481,11 @@
       <div class="report-toolbar panel-card">
         <div class="report-toolbar-left">
           <h2 class="panel-title">시간 분석 및 다음 달 목표</h2>
+          <div class="date-nav-row report-month-nav" id="reportMonthNav">
+            <button type="button" id="reportPrevMonthBtn" class="icon-btn" aria-label="이전 달">&lsaquo;</button>
+            <span id="reportMonthLabel" class="report-month-title">2026년 11월</span>
+            <button type="button" id="reportNextMonthBtn" class="icon-btn" aria-label="다음 달">&rsaquo;</button>
+          </div>
         </div>
         <div class="report-toolbar-right">
           <div class="filter-tabs" id="reportPeriodTabs">
@@ -489,7 +494,7 @@
             <button type="button" class="filter-pill" data-period="last7Days">최근 7일</button>
             <button type="button" class="filter-pill" data-period="today">오늘</button>
           </div>
-          <button type="button" id="loadSampleReportDataBtn" class="btn-xs btn-outline" title="분석 차트를 바로 체험할 수 있도록 예시 기록을 채웁니다">예시 채우기</button>
+          <button type="button" id="loadSampleReportDataBtn" class="btn-xs btn-outline" title="현재 선택된 달에 분석 체험용 예시 기록을 채웁니다">예시 채우기</button>
         </div>
       </div>
 
@@ -566,7 +571,10 @@
 
           <section class="panel-card ai-report-card">
             <div class="panel-head compact-head">
-              <h3 class="panel-title">AI 코칭 리포트</h3>
+              <div class="ai-report-head-left">
+                <h3 class="panel-title">AI 코칭 리포트</h3>
+                <span id="aiReportPeriodBadge" class="date-rel-badge">2026년 11월</span>
+              </div>
               <button type="button" id="generateAiReportBtn" class="btn-xs btn-ai">리포트 생성</button>
             </div>
             <div id="aiReportResultBox" class="ai-report-result">
@@ -838,6 +846,19 @@
             <button type="button" class="day-toggle-btn active" data-dow="4">목</button>
             <button type="button" class="day-toggle-btn active" data-dow="5">금</button>
             <button type="button" class="day-toggle-btn active" data-dow="6">토</button>
+          </div>
+          <div class="routine-custom-time-box">
+            <div class="steps-editor-head compact-subhead">
+              <label class="checkbox-label">
+                <input type="checkbox" id="routineCustomDayTimeToggle" />
+                <span>요일별 시작 시간 다르게 설정</span>
+              </label>
+              <div id="routineDayTimeQuickBtns" class="day-preset-btns hidden">
+                <button type="button" id="applyWeekdayTimeBtn" class="btn-xs btn-ghost" title="권장 시작 시각을 월~금요일에 일괄 적용합니다">평일 기본시각</button>
+                <button type="button" id="applyWeekendTimeBtn" class="btn-xs btn-ghost" title="토·일요일 시작 시각을 09:00으로 설정합니다">주말 09:00</button>
+              </div>
+            </div>
+            <div id="routineCustomDayTimesGrid" class="routine-day-times-grid hidden"></div>
           </div>
         </div>
 

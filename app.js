@@ -288,6 +288,57 @@
     return `${sorted.map(d => dayNames[d]).join('·')}요일`;
   }
 
+  function getRoutineStartTimeForDate(rtn, targetDateStr) {
+    const fallback = (rtn && rtn.startTime) || '07:00';
+    if (!rtn || !rtn.useCustomDayTimes || !rtn.dayTimes || !targetDateStr) {
+      return fallback;
+    }
+    const [ty, tm, td] = String(targetDateStr).split('-').map(Number);
+    if (!ty || !tm || !td) return fallback;
+    const dow = new Date(ty, tm - 1, td).getDay();
+    const customTime = rtn.dayTimes[dow] || rtn.dayTimes[String(dow)];
+    return customTime && /^\d{2}:\d{2}$/.test(customTime) ? customTime : fallback;
+  }
+
+  function formatRoutineScheduleSummaryKo(rtn) {
+    const baseTime = (rtn && rtn.startTime) || '07:00';
+    const orderRank = d => (d === 0 ? 7 : d);
+    const active =
+      rtn && Array.isArray(rtn.activeDays) && rtn.activeDays.length > 0
+        ? [...new Set(rtn.activeDays.map(Number))].sort((a, b) => orderRank(a) - orderRank(b))
+        : [1, 2, 3, 4, 5, 6, 0];
+
+    if (!rtn || !rtn.useCustomDayTimes || !rtn.dayTimes) {
+      return `${getRoutineDaysLabelKo(rtn)} · ${baseTime}`;
+    }
+
+    const groupsByTime = new Map();
+    active.forEach(dow => {
+      const t =
+        rtn.dayTimes[dow] || rtn.dayTimes[String(dow)] || baseTime;
+      const safeT = /^\d{2}:\d{2}$/.test(t) ? t : baseTime;
+      if (!groupsByTime.has(safeT)) groupsByTime.set(safeT, []);
+      groupsByTime.get(safeT).push(dow);
+    });
+
+    if (groupsByTime.size <= 1) {
+      const onlyTime = groupsByTime.keys().next().value || baseTime;
+      return `${getRoutineDaysLabelKo(rtn)} · ${onlyTime}`;
+    }
+
+    const dayNames = ['일', '월', '화', '수', '목', '금', '토'];
+    const parts = [];
+    groupsByTime.forEach((days, timeStr) => {
+      const sortedZeroFirst = [...days].sort((a, b) => a - b).join(',');
+      let label = '';
+      if (sortedZeroFirst === '1,2,3,4,5') label = '평일';
+      else if (sortedZeroFirst === '0,6') label = '주말';
+      else label = days.map(d => dayNames[d]).join('·');
+      parts.push(`${label} ${timeStr}`);
+    });
+    return parts.join(' · ');
+  }
+
   // -------------------- 초기 기본 상태 생성 --------------------
   const SAMPLE_ITEM_IDS = new Set([
     'sch_1', 'sch_2', 'sch_3', 'sch_4', 'sch_5', 'sch_6', 'sch_7', 'sch_8', 'sch_9', 'sch_10', 'sch_wk_meeting',
@@ -700,7 +751,8 @@
         { id: 'mg_1', title: '자기계발 및 직무 공부 월 35시간 달성하기', categoryId: 'cat_study', done: false },
         { id: 'mg_2', title: '주 3회 이상 저녁 유산소 · 스트레칭 실천', categoryId: 'cat_health', done: false },
         { id: 'mg_3', title: '모닝 개운 루틴 월 20회 이상 완주', categoryId: 'cat_routine', done: false }
-      ]
+      ],
+      aiReportsByPeriod: {}
     };
   }
 
@@ -709,6 +761,8 @@
   let selectedDate = getTodayStr();
   let miniCalCursor = new Date();
   let fullCalCursor = new Date();
+  let reportCursor = new Date();
+  let modalRoutineDayTimes = {};
 
   // 대시보드 중앙 타임라인 뷰 상태
   let dashScope = 'day';
@@ -2575,11 +2629,17 @@
     if (!container) return;
 
     container.innerHTML = '';
-    const remainingRoutines = state.routines.filter(
-      rtn =>
-        doesRoutineOccurOnDate(rtn, selectedDate) &&
-        !(Array.isArray(rtn.completedDates) && rtn.completedDates.includes(selectedDate))
-    );
+    const remainingRoutines = state.routines
+      .filter(
+        rtn =>
+          doesRoutineOccurOnDate(rtn, selectedDate) &&
+          !(Array.isArray(rtn.completedDates) && rtn.completedDates.includes(selectedDate))
+      )
+      .sort(
+        (a, b) =>
+          timeToMinutes(getRoutineStartTimeForDate(a, selectedDate)) -
+          timeToMinutes(getRoutineStartTimeForDate(b, selectedDate))
+      );
 
     if (sectionEl) {
       sectionEl.classList.toggle('hidden', remainingRoutines.length === 0);
@@ -2589,6 +2649,7 @@
     remainingRoutines.forEach(rtn => {
       const cat = getCategoryById(rtn.categoryId);
       const totalMins = rtn.steps.reduce((acc, s) => acc + Number(s.minutes || 0), 0);
+      const startOnDate = getRoutineStartTimeForDate(rtn, selectedDate);
 
       const row = document.createElement('div');
       row.className = 'routine-one-line';
@@ -2596,7 +2657,7 @@
         <div class="rol-left">
           <span class="rol-dot" style="background:${cat.color}"></span>
           <span class="rol-title">${escapeHtml(rtn.name)}</span>
-          <span class="rol-meta">${totalMins}분</span>
+          <span class="rol-meta">${startOnDate} · ${totalMins}분</span>
         </div>
         <button type="button" class="btn-xs btn-primary rtn-play-btn">시작</button>
       `;
@@ -2768,7 +2829,7 @@
       state.routines.forEach(rtn => {
         const cat = getCategoryById(rtn.categoryId);
         const totalMins = rtn.steps.reduce((acc, s) => acc + Number(s.minutes || 0), 0);
-        const daysLabel = getRoutineDaysLabelKo(rtn);
+        const scheduleSummary = formatRoutineScheduleSummaryKo(rtn);
         const isRunningThis = routinePlayer.running && routinePlayer.activeRoutineId === rtn.id;
         const isSelectedThis = targetRtn && targetRtn.id === rtn.id;
 
@@ -2777,18 +2838,9 @@
         card.innerHTML = `
           <div class="rmc-top">
             <span class="rmc-title">${escapeHtml(rtn.name)}</span>
-            <div class="rmc-top-badges">
-              ${
-                isRunningThis
-                  ? '<span class="rmc-state-pill running">실행 중</span>'
-                  : isSelectedThis
-                  ? '<span class="rmc-state-pill selected">선택됨</span>'
-                  : ''
-              }
-              <span class="cat-dot-tag" style="background:${cat.color}20;color:${cat.color}">${escapeHtml(cat.name)}</span>
-            </div>
+            <span class="cat-dot-tag" style="background:${cat.color}20;color:${cat.color}">${escapeHtml(cat.name)}</span>
           </div>
-          <div class="rmc-meta">${escapeHtml(daysLabel)} · ${rtn.startTime} · 총 ${totalMins}분 · ${rtn.steps.length}단계</div>
+          <div class="rmc-meta">${escapeHtml(scheduleSummary)} · 총 ${totalMins}분 · ${rtn.steps.length}단계</div>
           <details class="rmc-steps-details">
             <summary class="rmc-steps-summary">행동 순서 보기</summary>
             <div class="rmc-steps-preview">
@@ -2796,21 +2848,10 @@
             </div>
           </details>
           <div class="rmc-foot">
-            <div class="rmc-foot-left">
-              <button type="button" class="btn-xs ${isSelectedThis ? 'btn-teal' : 'btn-outline'} studio-select-btn">${isSelectedThis ? '선택됨' : '선택'}</button>
-              <button type="button" class="btn-xs btn-outline studio-edit-btn">편집</button>
-            </div>
+            <button type="button" class="btn-xs btn-outline studio-edit-btn">편집</button>
             <button type="button" class="btn-xs btn-primary studio-start-btn">${isRunningThis ? '진행 중' : '루틴 시작'}</button>
           </div>
         `;
-        card.querySelector('.studio-select-btn').addEventListener('click', e => {
-          e.stopPropagation();
-          selectedPreviewRoutineId = rtn.id;
-          if (routinePlayer.running && routinePlayer.activeRoutineId !== rtn.id) {
-            startRoutinePlayer(rtn.id);
-          }
-          renderRoutinePlayerTab();
-        });
         card.querySelector('.studio-start-btn').addEventListener('click', e => {
           e.stopPropagation();
           selectedPreviewRoutineId = rtn.id;
@@ -3405,7 +3446,7 @@
       const stack = document.createElement('div');
       stack.className = 'mc-items-stack';
 
-      const maxVisible = isCompact ? 3 : 4;
+      const maxVisible = isCompact ? 3 : 5;
       let renderedCount = 0;
 
       // 1. 할 일 마감 렌더링 (focus, all, deadline 모드)
@@ -4130,15 +4171,21 @@
 
   // -------------------- 탭 4: 타임트래커 분석 보고서 & 다음 달 목표 설계 --------------------
   function getReportDateRange(period, baseDateStr) {
-    const refStr = baseDateStr || getTodayStr();
-    const [ry, rm] = refStr.split('-').map(Number);
+    const todayStr = getTodayStr();
+    const refStr = baseDateStr || todayStr;
+    const [ty, tm] = todayStr.split('-').map(Number);
+    const thisYm = `${ty}-${String(tm).padStart(2, '0')}`;
+    const prevDateObj = new Date(ty, tm - 2, 1);
+    const lastYm = `${prevDateObj.getFullYear()}-${String(prevDateObj.getMonth() + 1).padStart(2, '0')}`;
 
     if (period === 'today') {
       return {
         startDate: refStr,
         endDate: refStr,
         dateList: [refStr],
-        periodLabel: '오늘'
+        periodKey: `today:${refStr}`,
+        periodLabel: '오늘',
+        periodFullLabel: `오늘 · ${formatShortMonthDayKo(refStr)}`
       };
     }
 
@@ -4152,38 +4199,43 @@
         startDate,
         endDate: refStr,
         dateList,
-        periodLabel: '최근 7일'
+        periodKey: `last7Days:${refStr}`,
+        periodLabel: '최근 7일',
+        periodFullLabel: `최근 7일 · ${formatShortMonthDayKo(startDate)}~${formatShortMonthDayKo(refStr)}`
       };
     }
 
-    if (period === 'lastMonth') {
-      const prevFirst = new Date(ry, rm - 2, 1);
-      const prevYear = prevFirst.getFullYear();
-      const prevMonthIdx = prevFirst.getMonth();
-      const lastDay = new Date(prevYear, prevMonthIdx + 1, 0).getDate();
-      const dateList = [];
-      for (let d = 1; d <= lastDay; d++) {
-        dateList.push(toDateStr(new Date(prevYear, prevMonthIdx, d)));
-      }
-      return {
-        startDate: dateList[0],
-        endDate: dateList[dateList.length - 1],
-        dateList,
-        periodLabel: '지난달'
-      };
+    let targetYear = reportCursor.getFullYear();
+    let targetMonthIdx = reportCursor.getMonth();
+
+    if (period === 'thisMonth') {
+      targetYear = ty;
+      targetMonthIdx = tm - 1;
+      reportCursor = new Date(targetYear, targetMonthIdx, 1);
+    } else if (period === 'lastMonth') {
+      targetYear = prevDateObj.getFullYear();
+      targetMonthIdx = prevDateObj.getMonth();
+      reportCursor = new Date(targetYear, targetMonthIdx, 1);
     }
 
-    // 기본값: 이번 달 (선택 날짜가 속한 달 전체)
-    const lastDay = new Date(ry, rm, 0).getDate();
+    const ymKey = `${targetYear}-${String(targetMonthIdx + 1).padStart(2, '0')}`;
+    const lastDay = new Date(targetYear, targetMonthIdx + 1, 0).getDate();
     const dateList = [];
     for (let d = 1; d <= lastDay; d++) {
-      dateList.push(toDateStr(new Date(ry, rm - 1, d)));
+      dateList.push(toDateStr(new Date(targetYear, targetMonthIdx, d)));
     }
+
+    const shortLabel =
+      ymKey === thisYm ? '이번 달' : ymKey === lastYm ? '지난달' : `${targetMonthIdx + 1}월`;
+
     return {
       startDate: dateList[0],
       endDate: dateList[dateList.length - 1],
       dateList,
-      periodLabel: '이번 달'
+      periodKey: `month:${ymKey}`,
+      ymKey,
+      periodLabel: shortLabel,
+      periodFullLabel: `${targetYear}년 ${targetMonthIdx + 1}월`
     };
   }
 
@@ -4259,18 +4311,121 @@
       goldenTimeLabel,
       dateList: range.dateList,
       dateSet,
-      periodLabel: range.periodLabel
+      periodKey: range.periodKey,
+      ymKey: range.ymKey || '',
+      periodLabel: range.periodLabel,
+      periodFullLabel: range.periodFullLabel || range.periodLabel
     };
   }
 
+  function applyAiReportDataToPlan(reportData) {
+    if (!reportData) return;
+    pushUndoSnapshot('AI 리포트 목표 반영');
+    state.reviewNotes.keep = reportData.keep || state.reviewNotes.keep;
+    state.reviewNotes.problem = reportData.problem || state.reviewNotes.problem;
+    state.reviewNotes.tryAction = reportData.tryAction || state.reviewNotes.tryAction;
+
+    if (Array.isArray(reportData.recommendedBudgets)) {
+      reportData.recommendedBudgets.forEach(rb => {
+        if (rb.categoryId && rb.monthlyHours !== undefined) {
+          state.timeBudgets[rb.categoryId] = Number(rb.monthlyHours);
+        }
+      });
+    }
+    if (Array.isArray(reportData.recommendedGoals)) {
+      reportData.recommendedGoals.forEach(gText => {
+        if (gText && !state.monthlyGoals.some(mg => mg.title === gText)) {
+          state.monthlyGoals.push({
+            id: uid('mg'),
+            title: gText,
+            categoryId: state.categories[1]?.id || state.categories[0].id,
+            done: false
+          });
+        }
+      });
+    }
+    saveState();
+    renderReportAndGoalsTab();
+    showToast('AI 분석 결과가 회고 노트와 다음 달 시간 예산·목표에 반영되었습니다.', { withUndo: true });
+  }
+
+  function renderSavedAiReportForPeriod(stats) {
+    const box = document.getElementById('aiReportResultBox');
+    const genBtn = document.getElementById('generateAiReportBtn');
+    const badgeEl = document.getElementById('aiReportPeriodBadge');
+    if (badgeEl) {
+      badgeEl.textContent = stats.periodFullLabel;
+    }
+    if (!box) return;
+
+    const saved =
+      state.aiReportsByPeriod && stats.periodKey ? state.aiReportsByPeriod[stats.periodKey] : null;
+
+    if (genBtn && !genBtn.disabled) {
+      genBtn.textContent = saved ? '다시 분석' : '리포트 생성';
+    }
+
+    if (!saved) {
+      box.innerHTML = `<p class="empty-guide">${escapeHtml(stats.periodFullLabel)} 데이터를 바탕으로 리포트 생성을 누르면 맞춤 회고 초안과 다음 달 시간 예산을 제안합니다.</p>`;
+      return;
+    }
+
+    box.innerHTML = `
+      <div class="ai-report-block">
+        <h4>${escapeHtml(stats.periodFullLabel)} 시간 사용 총평</h4>
+        <p><strong>${escapeHtml(saved.headline || '')}</strong></p>
+      </div>
+      <div class="ai-report-block">
+        <h4>계획 대비 실행 및 시간 누수 진단</h4>
+        <p>${escapeHtml(saved.timeLeakAnalysis || '')}</p>
+      </div>
+      <div class="ai-report-block">
+        <h4>골든타임 및 루틴 강점 분석</h4>
+        <p>${escapeHtml(saved.goldenTimeAnalysis || '')}</p>
+      </div>
+      <div class="ai-report-block">
+        <h4>추천 회고 초안 및 다음 달 액션 플랜</h4>
+        <p>• 유지할 점: ${escapeHtml(saved.keep || '')}<br/>
+           • 개선할 점: ${escapeHtml(saved.problem || '')}<br/>
+           • 다음 달 전략: ${escapeHtml(saved.tryAction || '')}</p>
+      </div>
+      <div style="margin-top:12px;display:flex;justify-content:flex-end;">
+        <button type="button" id="applyAiReportToPlanBtn" class="btn-primary btn-xs">회고 노트 및 다음 달 목표 예산에 즉시 반영</button>
+      </div>
+    `;
+
+    document.getElementById('applyAiReportToPlanBtn')?.addEventListener('click', () => {
+      applyAiReportDataToPlan(saved);
+    });
+  }
+
   function renderReportAndGoalsTab() {
+    const stats = computeReportStatistics();
+    const todayStr = getTodayStr();
+    const [ty, tm] = todayStr.split('-').map(Number);
+    const thisYm = `${ty}-${String(tm).padStart(2, '0')}`;
+    const prevDateObj = new Date(ty, tm - 2, 1);
+    const lastYm = `${prevDateObj.getFullYear()}-${String(prevDateObj.getMonth() + 1).padStart(2, '0')}`;
+
     document.querySelectorAll('#reportPeriodTabs .filter-pill').forEach(btn => {
-      btn.classList.toggle('active', btn.dataset.period === currentReportPeriod);
+      const p = btn.dataset.period;
+      let isActive = p === currentReportPeriod;
+      if (currentReportPeriod === 'customMonth') {
+        if (p === 'thisMonth' && stats.ymKey === thisYm) isActive = true;
+        else if (p === 'lastMonth' && stats.ymKey === lastYm) isActive = true;
+        else isActive = false;
+      }
+      btn.classList.toggle('active', isActive);
     });
 
-    const stats = computeReportStatistics();
+    const monthLabelEl = document.getElementById('reportMonthLabel');
+    if (monthLabelEl) {
+      monthLabelEl.textContent = stats.periodFullLabel;
+    }
+
     const totalActualHours = (stats.totalActualMinutes / 60).toFixed(1);
     document.getElementById('reportTotalActualText').textContent = `총 ${totalActualHours}시간`;
+    renderSavedAiReportForPeriod(stats);
 
     // 1. SVG 도넛 차트 렌더링
     const donutBox = document.getElementById('reportDonutChart');
@@ -4588,21 +4743,24 @@
       }
     }
 
-    // 2. 루틴 시작 알람 확인 (실천 요일 반영 + 사전 예고 알림 + 절전 복귀 10분 보정)
+    // 2. 루틴 시작 알람 확인 (요일별 개별 시작 시각 + 실천 요일 반영 + 사전 예고 알림 + 절전 복귀 10분 보정)
     for (let i = 0; i < state.routines.length; i++) {
       const r = state.routines[i];
-      if (!r.alarm || !r.startTime) continue;
+      if (!r.alarm) continue;
       if (!doesRoutineOccurOnDate(r, todayStr)) continue;
       const doneToday = Array.isArray(r.completedDates) && r.completedDates.includes(todayStr);
       if (doneToday) continue;
 
-      const targetMins = timeToMinutes(r.startTime);
+      const rStartTime = getRoutineStartTimeForDate(r, todayStr);
+      if (!rStartTime) continue;
+
+      const targetMins = timeToMinutes(rStartTime);
       const leadMins = Math.max(0, Number(r.alarmLeadMinutes || 0));
 
       if (leadMins > 0) {
         const preTarget = targetMins - leadMins;
         if (nowMins >= preTarget && nowMins < targetMins) {
-          const preKey = `pre_rtn_${r.id}_${todayStr}_${r.startTime}_${leadMins}`;
+          const preKey = `pre_rtn_${r.id}_${todayStr}_${rStartTime}_${leadMins}`;
           if (!triggeredAlarmKeys.has(preKey)) {
             markAlarmKeyTriggered(preKey);
             triggerAlarmModal({
@@ -4610,7 +4768,7 @@
               alarmKind: 'pre',
               leadMinutes: Math.max(1, targetMins - nowMins),
               title: r.name,
-              time: r.startTime,
+              time: rStartTime,
               categoryId: r.categoryId,
               refId: r.id
             });
@@ -4621,7 +4779,7 @@
 
       const diffMins = nowMins - targetMins;
       if (diffMins >= 0 && diffMins <= 10) {
-        const mainKey = `rtn_${r.id}_${todayStr}_${r.startTime}`;
+        const mainKey = `rtn_${r.id}_${todayStr}_${rStartTime}`;
         if (!triggeredAlarmKeys.has(mainKey)) {
           markAlarmKeyTriggered(mainKey);
           triggerAlarmModal({
@@ -4629,7 +4787,7 @@
             alarmKind: diffMins > 1 ? 'catchup' : 'ontime',
             lateMinutes: diffMins,
             title: r.name,
-            time: r.startTime,
+            time: rStartTime,
             categoryId: r.categoryId,
             refId: r.id
           });
@@ -5159,102 +5317,84 @@
 
     try {
       const compactStats = {
-        periodLabel: stats.periodLabel,
+        periodLabel: stats.periodFullLabel,
         dayCount: stats.dateList.length,
         totalPlanMinutes: stats.totalPlanMinutes,
         totalActualMinutes: stats.totalActualMinutes,
         goldenTimeLabel: stats.goldenTimeLabel,
-        byCategory: stats.byCategory
+        byCategory: stats.byCategory.map(c => ({
+          id: c.id,
+          name: c.name,
+          planMinutes: c.planMinutes,
+          actualMinutes: c.actualMinutes
+        }))
       };
 
       const aiRes = await callCloudflareAi('analyze_report', {
-        monthLabel: selectedDate.slice(0, 7),
+        monthLabel: stats.periodFullLabel,
         statsSummary: compactStats,
         userGoalWish,
         categories: state.categories
       });
 
       const reportData = aiRes || buildLocalSmartReport(stats, userGoalWish);
-
-      const box = document.getElementById('aiReportResultBox');
-      if (box) {
-        box.innerHTML = `
-          <div class="ai-report-block">
-            <h4>시간 사용 총평</h4>
-            <p><strong>${escapeHtml(reportData.headline)}</strong></p>
-          </div>
-          <div class="ai-report-block">
-            <h4>계획 대비 실행 및 시간 누수 진단</h4>
-            <p>${escapeHtml(reportData.timeLeakAnalysis)}</p>
-          </div>
-          <div class="ai-report-block">
-            <h4>골든타임 및 루틴 강점 분석</h4>
-            <p>${escapeHtml(reportData.goldenTimeAnalysis)}</p>
-          </div>
-          <div class="ai-report-block">
-            <h4>추천 회고 초안 및 다음 달 액션 플랜</h4>
-            <p>• 유지할 점: ${escapeHtml(reportData.keep)}<br/>
-               • 개선할 점: ${escapeHtml(reportData.problem)}<br/>
-               • 다음 달 전략: ${escapeHtml(reportData.tryAction)}</p>
-          </div>
-          <div style="margin-top:12px;display:flex;justify-content:flex-end;">
-            <button type="button" id="applyAiReportToPlanBtn" class="btn-primary btn-xs">회고 노트 및 다음 달 목표 예산에 즉시 반영</button>
-          </div>
-        `;
-
-        document.getElementById('applyAiReportToPlanBtn').addEventListener('click', () => {
-          pushUndoSnapshot('AI 리포트 목표 반영');
-          state.reviewNotes.keep = reportData.keep || state.reviewNotes.keep;
-          state.reviewNotes.problem = reportData.problem || state.reviewNotes.problem;
-          state.reviewNotes.tryAction = reportData.tryAction || state.reviewNotes.tryAction;
-
-          if (Array.isArray(reportData.recommendedBudgets)) {
-            reportData.recommendedBudgets.forEach(rb => {
-              if (rb.categoryId && rb.monthlyHours !== undefined) {
-                state.timeBudgets[rb.categoryId] = Number(rb.monthlyHours);
-              }
-            });
-          }
-          if (Array.isArray(reportData.recommendedGoals)) {
-            reportData.recommendedGoals.forEach(gText => {
-              if (gText && !state.monthlyGoals.some(mg => mg.title === gText)) {
-                state.monthlyGoals.push({
-                  id: uid('mg'),
-                  title: gText,
-                  categoryId: state.categories[1]?.id || state.categories[0].id,
-                  done: false
-                });
-              }
-            });
-          }
-          saveState();
-          renderReportAndGoalsTab();
-          showToast('AI 분석 결과가 회고 노트와 다음 달 시간 예산·목표에 반영되었습니다.', { withUndo: true });
-        });
+      if (!state.aiReportsByPeriod || typeof state.aiReportsByPeriod !== 'object') {
+        state.aiReportsByPeriod = {};
       }
+      if (stats.periodKey) {
+        state.aiReportsByPeriod[stats.periodKey] = reportData;
+      }
+      saveState();
+      renderSavedAiReportForPeriod(stats);
 
       if (isReverseGoalDesign) {
-        const applyBtn = document.getElementById('applyAiReportToPlanBtn');
-        if (applyBtn) applyBtn.click();
+        applyAiReportDataToPlan(reportData);
       } else {
-        showToast('타임트래커 데이터 기반 AI 심층 분석 보고서가 완성되었습니다.');
+        showToast(`${stats.periodFullLabel} AI 코칭 리포트가 완성되었습니다.`);
       }
     } finally {
       btn.disabled = false;
-      btn.textContent = origText;
+      const latestStats = computeReportStatistics();
+      const hasSaved =
+        state.aiReportsByPeriod && latestStats.periodKey && state.aiReportsByPeriod[latestStats.periodKey];
+      btn.textContent = isReverseGoalDesign ? origText : hasSaved ? '다시 분석' : '리포트 생성';
     }
   }
 
   function buildLocalSmartReport(stats, userGoalWish) {
+    const pLabel = stats.periodFullLabel || stats.periodLabel || '이번 기간';
+    if (stats.totalActualMinutes === 0) {
+      return {
+        headline: `${pLabel}에는 아직 기록된 실행 시간이 없습니다. 핵심 과업부터 타임트래킹을 시작해 보세요.`,
+        timeLeakAnalysis: `${pLabel} 계획 시간은 ${formatDurationKo(stats.totalPlanMinutes)}이며, 실제 타이머 기록이 쌓이면 계획 대비 누수 구간을 정밀 진단할 수 있습니다.`,
+        goldenTimeAnalysis: `오전 집중 블록과 루틴 플레이어를 연동하면 별도 입력 없이도 실행 기록이 자동으로 축적됩니다.`,
+        keep: `정기 일정과 할 일 계획을 세워 시간 구조를 먼저 설계하려는 시도`,
+        problem: `계획 완료 후 실제 소요 시간 기록이 누락되어 실행 데이터 비교가 어려운 점`,
+        tryAction: userGoalWish
+          ? `'${userGoalWish}' 달성을 위해 주 3회 핵심 블록을 타임라인에 먼저 고정 배치하기`
+          : `하루 1건 이상 핵심 일정에 타이머를 켜서 실제 몰입 시간 기록 남기기`,
+        recommendedBudgets: stats.byCategory.map(c => ({
+          categoryId: c.id,
+          monthlyHours: Math.max(10, Math.round(c.planMinutes / 60) || 20),
+          reason: `${pLabel} 초기 권장 배분`
+        })),
+        recommendedGoals: [
+          userGoalWish ? `${userGoalWish} 주간 고정 시간 확보` : '핵심 프로젝트 주간 집중 시간 10시간 확보',
+          '평일 오전 첫 일정 시작 시 타이머 연동 습관화',
+          '주간 요일 보드에서 매주 일요일 계획 대비 실행 점검'
+        ]
+      };
+    }
+
     const sortedActual = [...stats.byCategory].sort((a, b) => b.actualMinutes - a.actualMinutes);
     const topCat = sortedActual[0] || { name: '업무', actualMinutes: 120 };
     const lowCat = sortedActual[sortedActual.length - 1] || { name: '자기계발', actualMinutes: 30 };
     const totalHrs = (stats.totalActualMinutes / 60).toFixed(1);
 
     return {
-      headline: `총 ${totalHrs}시간의 실제 기록 중 '${topCat.name}' 비중이 가장 높으며, ${stats.goldenTimeLabel}에 최고의 몰입도를 보였습니다.`,
-      timeLeakAnalysis: `'${topCat.name}' 영역은 계획 대비 안정적으로 실행되고 있으나, 오후 늦은 시간대 일정이 길어질 때 '${lowCat.name}' 실행 시간이 줄어드는 패턴이 관찰됩니다.`,
-      goldenTimeAnalysis: `${stats.goldenTimeLabel} 구간의 계획 일치율이 가장 높습니다. 가장 에너지가 필요한 핵심 과업을 이 골든타임에 고정 배치하면 달성률을 크게 높일 수 있습니다.`,
+      headline: `${pLabel} 총 ${totalHrs}시간의 실행 기록 중 '${topCat.name}' 비중이 가장 높으며, ${stats.goldenTimeLabel}에 최고의 몰입도를 보였습니다.`,
+      timeLeakAnalysis: `${pLabel} 기준 '${topCat.name}' 영역은 안정적으로 실행되고 있으나, 오후 일정이 길어질 때 '${lowCat.name}' 실행 시간이 줄어드는 경향이 관찰됩니다.`,
+      goldenTimeAnalysis: `${stats.goldenTimeLabel} 구간의 계획 일치율이 가장 높습니다. 에너지가 필요한 핵심 과업을 이 시간대에 우선 배치하면 달성률을 높일 수 있습니다.`,
       keep: `${stats.goldenTimeLabel} 집중 시간대 활용과 루틴 타이머를 통한 실제 사용 시간 기록 습관`,
       problem: `일정 사이 여유 버퍼가 부족해 앞 일정이 지연될 때 저녁 시간대 목표가 밀리는 현상`,
       tryAction: userGoalWish
@@ -5352,14 +5492,52 @@
     }
   }
 
+  function renderRoutineModalDayTimesGrid() {
+    const toggleEl = document.getElementById('routineCustomDayTimeToggle');
+    const gridEl = document.getElementById('routineCustomDayTimesGrid');
+    const quickBtnsEl = document.getElementById('routineDayTimeQuickBtns');
+    if (!toggleEl || !gridEl) return;
+
+    const enabled = Boolean(toggleEl.checked);
+    gridEl.classList.toggle('hidden', !enabled);
+    if (quickBtnsEl) quickBtnsEl.classList.toggle('hidden', !enabled);
+    if (!enabled) return;
+
+    const baseTime = document.getElementById('routineModalTime')?.value || '07:00';
+    let activeDows = Array.from(document.querySelectorAll('#routineActiveDaysGroup .day-toggle-btn.active'))
+      .map(btn => Number(btn.dataset.dow))
+      .sort((a, b) => a - b);
+    if (activeDows.length === 0) activeDows = [0, 1, 2, 3, 4, 5, 6];
+
+    const dayNames = ['일', '월', '화', '수', '목', '금', '토'];
+    gridEl.innerHTML = '';
+
+    activeDows.forEach(dow => {
+      if (!modalRoutineDayTimes[dow]) {
+        modalRoutineDayTimes[dow] = baseTime;
+      }
+      const item = document.createElement('div');
+      item.className = 'routine-day-time-cell';
+      item.innerHTML = `
+        <span class="rdt-day-label ${dow === 0 ? 'sun-text' : dow === 6 ? 'sat-text' : ''}">${dayNames[dow]}</span>
+        <input type="time" class="rdt-time-input" data-daytime-dow="${dow}" value="${modalRoutineDayTimes[dow]}" aria-label="${dayNames[dow]}요일 시작 시각" />
+      `;
+      item.querySelector('.rdt-time-input').addEventListener('change', e => {
+        modalRoutineDayTimes[dow] = e.target.value || baseTime;
+      });
+      gridEl.appendChild(item);
+    });
+  }
+
   // 루틴 생성·편집 모달
   function openRoutineModalForEdit(rtn = null) {
     const isEdit = Boolean(rtn);
+    const defaultTime = isEdit ? rtn.startTime || '07:00' : '07:00';
     document.getElementById('routineModalHeading').textContent = isEdit ? '루틴 편집' : '새 루틴 만들기';
     document.getElementById('routineModalId').value = isEdit ? rtn.id : '';
     document.getElementById('routineModalName').value = isEdit ? rtn.name : '';
     document.getElementById('routineModalCategory').value = isEdit ? rtn.categoryId : state.categories[0].id;
-    document.getElementById('routineModalTime').value = isEdit ? rtn.startTime || '07:00' : '07:00';
+    document.getElementById('routineModalTime').value = defaultTime;
     document.getElementById('routineModalAlarm').checked = isEdit ? rtn.alarm !== false : true;
     const rtnLeadSel = document.getElementById('routineModalAlarmLead');
     if (rtnLeadSel) rtnLeadSel.value = String(isEdit ? rtn.alarmLeadMinutes || 0 : 0);
@@ -5372,6 +5550,17 @@
       const dow = Number(btn.dataset.dow);
       btn.classList.toggle('active', activeDays.includes(dow));
     });
+
+    modalRoutineDayTimes = {};
+    for (let d = 0; d <= 6; d++) {
+      const savedT = isEdit && rtn.dayTimes && (rtn.dayTimes[d] || rtn.dayTimes[String(d)]);
+      modalRoutineDayTimes[d] = savedT && /^\d{2}:\d{2}$/.test(savedT) ? savedT : defaultTime;
+    }
+    const customToggle = document.getElementById('routineCustomDayTimeToggle');
+    if (customToggle) {
+      customToggle.checked = Boolean(isEdit && rtn.useCustomDayTimes);
+    }
+    renderRoutineModalDayTimesGrid();
 
     const delBtn = document.getElementById('routineModalDeleteBtn');
     if (isEdit) delBtn.classList.remove('hidden');
@@ -5583,29 +5772,43 @@
     const safeRoutines = Array.isArray(rawState.routines)
       ? rawState.routines
           .filter(r => r && typeof r === 'object')
-          .map(r => ({
-            ...r,
-            id: String(r.id || uid('rtn')),
-            name: String(r.name || '루틴').trim() || '루틴',
-            categoryId: safeCat(r.categoryId),
-            startTime: minutesToTime(timeToMinutes(r.startTime || '07:00')),
-            alarm: r.alarm !== false,
-            alarmLeadMinutes: Number(r.alarmLeadMinutes || 0),
-            activeDays:
-              Array.isArray(r.activeDays) && r.activeDays.length > 0
-                ? r.activeDays.map(Number)
-                : [0, 1, 2, 3, 4, 5, 6],
-            completedDates: Array.isArray(r.completedDates) ? r.completedDates : [],
-            steps:
-              Array.isArray(r.steps) && r.steps.length > 0
-                ? r.steps.map(st => ({
-                    id: String(st?.id || uid('st')),
-                    title: String(st?.title || '단계 행동').trim() || '단계 행동',
-                    minutes: Math.max(1, Number(st?.minutes || 5)),
-                    tip: String(st?.tip || '')
-                  }))
-                : [{ id: uid('st'), title: '핵심 행동', minutes: 5, tip: '' }]
-          }))
+          .map(r => {
+            const baseSt = minutesToTime(timeToMinutes(r.startTime || '07:00'));
+            const cleanDayTimes = {};
+            if (r.dayTimes && typeof r.dayTimes === 'object') {
+              for (let d = 0; d <= 6; d++) {
+                const rawVal = r.dayTimes[d] || r.dayTimes[String(d)];
+                if (typeof rawVal === 'string' && rawVal.trim()) {
+                  cleanDayTimes[d] = minutesToTime(timeToMinutes(rawVal));
+                }
+              }
+            }
+            return {
+              ...r,
+              id: String(r.id || uid('rtn')),
+              name: String(r.name || '루틴').trim() || '루틴',
+              categoryId: safeCat(r.categoryId),
+              startTime: baseSt,
+              useCustomDayTimes: Boolean(r.useCustomDayTimes),
+              dayTimes: cleanDayTimes,
+              alarm: r.alarm !== false,
+              alarmLeadMinutes: Number(r.alarmLeadMinutes || 0),
+              activeDays:
+                Array.isArray(r.activeDays) && r.activeDays.length > 0
+                  ? r.activeDays.map(Number)
+                  : [0, 1, 2, 3, 4, 5, 6],
+              completedDates: Array.isArray(r.completedDates) ? r.completedDates : [],
+              steps:
+                Array.isArray(r.steps) && r.steps.length > 0
+                  ? r.steps.map(st => ({
+                      id: String(st?.id || uid('st')),
+                      title: String(st?.title || '단계 행동').trim() || '단계 행동',
+                      minutes: Math.max(1, Number(st?.minutes || 5)),
+                      tip: String(st?.tip || '')
+                    }))
+                  : [{ id: uid('st'), title: '핵심 행동', minutes: 5, tip: '' }]
+            };
+          })
       : fallback.routines;
 
     const safeGoals = Array.isArray(rawState.monthlyGoals)
@@ -5619,6 +5822,11 @@
           }))
       : fallback.monthlyGoals;
 
+    const safeAiReports =
+      rawState.aiReportsByPeriod && typeof rawState.aiReportsByPeriod === 'object'
+        ? rawState.aiReportsByPeriod
+        : {};
+
     return {
       ...fallback,
       ...rawState,
@@ -5626,6 +5834,7 @@
       settings: { ...fallback.settings, ...(rawState.settings || {}) },
       reviewNotes: { ...fallback.reviewNotes, ...(rawState.reviewNotes || {}) },
       timeBudgets: { ...fallback.timeBudgets, ...(rawState.timeBudgets || {}) },
+      aiReportsByPeriod: safeAiReports,
       categories: rawCats,
       schedules: safeSchedules,
       actualLogs: safeActuals,
@@ -6318,6 +6527,16 @@
   // -------------------- 예시 기록 풍부하게 채우기 & 데이터 정리 --------------------
   function populateRichSampleReportLogs() {
     const today = getTodayStr();
+    const range = getReportDateRange(currentReportPeriod, selectedDate || today);
+    const isCurrentMonthOrRecent =
+      currentReportPeriod === 'thisMonth' ||
+      currentReportPeriod === 'last7Days' ||
+      currentReportPeriod === 'today' ||
+      (range.ymKey && range.ymKey === today.slice(0, 7));
+    const anchorDate = isCurrentMonthOrRecent
+      ? today
+      : range.dateList[Math.min(14, range.dateList.length - 1)] || today;
+
     const sampleItems = [
       { daysAgo: 2, title: '주간 핵심 프로젝트 개발', start: '09:00', end: '12:00', cat: 'cat_work' },
       { daysAgo: 2, title: '직무 역량 강의 수강 및 요약', start: '14:00', end: '16:00', cat: 'cat_study' },
@@ -6334,7 +6553,7 @@
     pushUndoSnapshot('예시 기록 추가');
     let addedCount = 0;
     sampleItems.forEach(item => {
-      const dStr = addDaysStr(today, -item.daysAgo);
+      const dStr = addDaysStr(anchorDate, -item.daysAgo);
       const planExists = state.schedules.some(
         s => s.date === dStr && s.title === item.title && s.startTime === item.start
       );
@@ -6369,13 +6588,13 @@
 
     if (addedCount === 0) {
       undoStack.pop();
-      showToast('이미 이번 달 타임트래커 예시 기록이 반영되어 있습니다.');
+      showToast(`${range.periodFullLabel || '선택 기간'}에 이미 예시 기록이 반영되어 있습니다.`);
       return;
     }
 
     saveState();
     renderAll();
-    showToast(`이번 달 타임트래커 예시 기록 ${addedCount}건이 추가되었습니다.`, { withUndo: true });
+    showToast(`${range.periodFullLabel || '선택 기간'} 예시 기록 ${addedCount}건이 추가되었습니다.`, { withUndo: true });
   }
 
   function clearSampleDataOnly() {
@@ -6548,7 +6767,7 @@
           badgeCls: 'plan',
           title: r.name,
           dateStr: getTodayStr(),
-          subText: `${r.startTime || '07:00'} 시작 · ${getRoutineDaysLabelKo(r)} · 총 ${totalMin}분 · ${cat.name}`,
+          subText: `${formatRoutineScheduleSummaryKo(r)} · 총 ${totalMin}분 · ${cat.name}`,
           projectTag: '',
           color: cat.color,
           rawItem: r
@@ -7039,10 +7258,11 @@
     });
     document.getElementById('addRoutineStepRowBtn').addEventListener('click', () => appendRoutineStepEditorRow('', 5, ''));
 
-    // 루틴 요일 선택 및 프리셋 버튼
+    // 루틴 요일 선택 · 프리셋 · 요일별 시작 시간 설정
     document.querySelectorAll('#routineActiveDaysGroup .day-toggle-btn').forEach(btn => {
       btn.addEventListener('click', () => {
         btn.classList.toggle('active');
+        renderRoutineModalDayTimesGrid();
       });
     });
 
@@ -7058,7 +7278,27 @@
         document.querySelectorAll('#routineActiveDaysGroup .day-toggle-btn').forEach(btn => {
           btn.classList.toggle('active', targetSet.has(Number(btn.dataset.dow)));
         });
+        renderRoutineModalDayTimesGrid();
       });
+    });
+
+    document.getElementById('routineCustomDayTimeToggle')?.addEventListener('change', () => {
+      renderRoutineModalDayTimesGrid();
+    });
+
+    document.getElementById('applyWeekdayTimeBtn')?.addEventListener('click', () => {
+      const baseTime = document.getElementById('routineModalTime')?.value || '07:00';
+      [1, 2, 3, 4, 5].forEach(d => {
+        modalRoutineDayTimes[d] = baseTime;
+      });
+      renderRoutineModalDayTimesGrid();
+    });
+
+    document.getElementById('applyWeekendTimeBtn')?.addEventListener('click', () => {
+      [0, 6].forEach(d => {
+        modalRoutineDayTimes[d] = '09:00';
+      });
+      renderRoutineModalDayTimesGrid();
     });
 
     document.getElementById('routineModalForm').addEventListener('submit', e => {
@@ -7069,12 +7309,26 @@
       const startTime = document.getElementById('routineModalTime').value || '07:00';
       const alarm = document.getElementById('routineModalAlarm').checked;
       const alarmLeadMinutes = Number(document.getElementById('routineModalAlarmLead')?.value || 0);
+      const useCustomDayTimes = Boolean(document.getElementById('routineCustomDayTimeToggle')?.checked);
 
       let activeDays = Array.from(document.querySelectorAll('#routineActiveDaysGroup .day-toggle-btn.active'))
         .map(btn => Number(btn.dataset.dow))
         .sort((a, b) => a - b);
       if (activeDays.length === 0) {
         activeDays = [0, 1, 2, 3, 4, 5, 6];
+      }
+
+      const dayTimes = {};
+      if (useCustomDayTimes) {
+        document.querySelectorAll('#routineCustomDayTimesGrid .rdt-time-input').forEach(inp => {
+          const dow = Number(inp.dataset.daytimeDow);
+          if (!Number.isNaN(dow) && inp.value) {
+            modalRoutineDayTimes[dow] = inp.value;
+          }
+        });
+        activeDays.forEach(dow => {
+          dayTimes[dow] = modalRoutineDayTimes[dow] || startTime;
+        });
       }
 
       const stepRows = document.querySelectorAll('#routineStepRowsContainer .step-edit-row');
@@ -7093,6 +7347,8 @@
           target.name = name;
           target.categoryId = categoryId;
           target.startTime = startTime;
+          target.useCustomDayTimes = useCustomDayTimes;
+          target.dayTimes = dayTimes;
           target.alarm = alarm;
           target.alarmLeadMinutes = alarmLeadMinutes;
           target.activeDays = activeDays;
@@ -7108,6 +7364,8 @@
           name,
           categoryId,
           startTime,
+          useCustomDayTimes,
+          dayTimes,
           alarm,
           alarmLeadMinutes,
           activeDays,
@@ -7252,11 +7510,21 @@
     // 탭 4: 타임트래커 보고서 및 다음 달 목표 이벤트
     document.querySelectorAll('#reportPeriodTabs .filter-pill').forEach(btn => {
       btn.addEventListener('click', () => {
-        document.querySelectorAll('#reportPeriodTabs .filter-pill').forEach(b => b.classList.remove('active'));
-        btn.classList.add('active');
         currentReportPeriod = btn.dataset.period;
         renderReportAndGoalsTab();
       });
+    });
+
+    document.getElementById('reportPrevMonthBtn')?.addEventListener('click', () => {
+      reportCursor = new Date(reportCursor.getFullYear(), reportCursor.getMonth() - 1, 1);
+      currentReportPeriod = 'customMonth';
+      renderReportAndGoalsTab();
+    });
+
+    document.getElementById('reportNextMonthBtn')?.addEventListener('click', () => {
+      reportCursor = new Date(reportCursor.getFullYear(), reportCursor.getMonth() + 1, 1);
+      currentReportPeriod = 'customMonth';
+      renderReportAndGoalsTab();
     });
 
     document.getElementById('loadSampleReportDataBtn').addEventListener('click', populateRichSampleReportLogs);

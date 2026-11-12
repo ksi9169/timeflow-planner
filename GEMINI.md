@@ -11,6 +11,15 @@
   - Database & Keep-Alive: LocalStorage 즉시 저장 + Supabase(`public.escape_rooms` 테이블 `TIMEFLOW:<동기화코드>` 실시간 클라우드 동기화) + 3일 주기 이중 잠김 방지(Cloudflare Cron `0 0 */3 * *` + [`.github/workflows/keep-alive.yml`](file:///g:/내%20드라이브/바이브%20코딩/일정관리/.github/workflows/keep-alive.yml))
 
 ## 2. 최근 완료된 작업 내역
+- **PC · 태블릿 상하좌우 100% 풀스크린 확장 · 리포트 자유 연월 이동 & 월별 초고속 AI 코칭 · 루틴 요일별 시작 시간 지원 완료 (2026-11-12)**:
+  - **PC · 태블릿 상하좌우 뷰포트 최대치 레이아웃 확장**: `.quick-input-bar`와 `.main-container`의 `max-width` 제한을 해제(`width: 100%; padding: 0 24px`)해 화면 좌우 전체 폭을 활용하고, `100dvh` 기반으로 `오늘` 좌우 패널 높이 동기화(`calc(100dvh - 152px)`), `캘린더` 월간 셀(`5행 자동 확장` + 일일 최대 5개 미리보기)·주간 `요일 보드` 2줄(`4열 × 2줄 균일 확장`)·`시간표`·`마감 목록`, `루틴` 좌우 패널까지 위아래 뷰포트를 꽉 채우도록 최적화
+  - **주간 `요일 보드` 반응형 `계획 | 실행` 2열 최적화**: PC · 태블릿(`> 680px`, `981px+` 4열×2줄 / `681~980px` 2열)에서는 요일 카드 내부 `계획 | 실행` 세로 2열(`.wk-dual-split`)을 쾌적하게 유지하고, 모바일(`<= 680px`)에서는 자동으로 1열(`grid-template-columns: 1fr`)로 전환해 글자 찌그러짐 차단
+  - **리포트 자유 연·월 탐색 + 기간별 AI 코칭 캐시 연동 + 생성 속도 3배 단축**:
+    - 리포트 상단 툴바에 `< YYYY년 M월 >` 월 이동 컨트롤(`#reportPrevMonthBtn`, `#reportMonthLabel`, `#reportNextMonthBtn`)을 추가해 과거·미래 어느 달이든 자유롭게 조회 가능하도록 개선
+    - 월/기간 이동 시 `#aiReportPeriodBadge`와 `#aiReportResultBox`가 해당 기간 전용 캐시(`state.aiReportsByPeriod[periodKey]`)로 즉시 전환되도록 수정하고, `worker.js`에서 Gemini 2.5 계열 `thinkingConfig: { thinkingBudget: 0 }` 적용 및 프롬프트·토큰(`maxOutputTokens: 900`) 경량화로 AI 코칭 생성 시간을 1~2초대로 단축
+  - **루틴 목록 간결화 및 요일별 시작 시간 개별 설정**:
+    - 루틴 목록 카드에서 불필요한 `선택됨` 상태 배지와 `선택` 버튼을 제거하고 카드 클릭 시 좌측 루틴 플레이어가 즉시 전환되도록 단순화
+    - 루틴 편집 모달에 `요일별 시작 시간 다르게 설정`(`#routineCustomDayTimeToggle`, `평일 기본시각` / `주말 09:00` 빠른 설정 포함)을 추가하여 요일마다 다른 시작 시각(`dayTimes`)으로 알람·오늘 남은 루틴·루틴 목록 요약(`평일 07:00 · 주말 09:00`)이 동작하도록 구현
 - **실화면 4대 UI·인터랙션 결함 정밀 수정 — 할 일 잘림 해소 · 루틴 선택 연동 · 와이드 월간/2줄 균일 주간 보드 · 마감 목록 정돈 완료 (2026-11-12)**:
   - **`오늘` 탭 할 일 그룹 잘림 완전 해소**: `.todo-list-scroll > *` 및 `.project-group-block`, `.todo-item-card`에 `flex-shrink: 0`과 `overflow: visible`을 적용하고 목록 높이를 `620px`로 확장해 `개별 할 일`과 `@태그` 묶음 내부 할 일이 세로로 압축·절단되던 현상을 해결(`오늘` 필터 시 당일 발생 일정만 깔끔히 표시)
   - **`루틴` 목록 ↔ 좌측 플레이어 즉시 전환 및 루틴 편집 모달 가로 스크롤 제거**: `루틴 목록` 카드 클릭 또는 `선택` 버튼 클릭 시 좌측 루틴 플레이어가 즉시 해당 루틴으로 전환(`selectedPreviewRoutineId` 연동 + 대기 상태 `루틴 시작` 버튼 직결)되도록 보완하고, 루틴 편집 모달(`.step-edit-row`)의 행동 단계 입력 행을 2단 레이아웃(`.step-row-top` + `.step-row-tip`)으로 개편해 좌우 잘림 및 가로 스크롤을 완전히 제거

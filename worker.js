@@ -93,12 +93,21 @@ async function generateWithFallback(apiKeys, payload, timeoutMs = 12000) {
       const ctrl = new AbortController();
       const timer = setTimeout(() => ctrl.abort(), timeoutMs);
       try {
+        const effectivePayload = modelName.startsWith('gemini-2.5-')
+          ? {
+              ...payload,
+              generationConfig: {
+                ...(payload.generationConfig || {}),
+                thinkingConfig: { thinkingBudget: 0 }
+              }
+            }
+          : payload;
         const url = `https://generativelanguage.googleapis.com/v1beta/models/${modelName}:generateContent?key=${encodeURIComponent(key)}`;
         const res = await fetch(url, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           signal: ctrl.signal,
-          body: JSON.stringify(payload)
+          body: JSON.stringify(effectivePayload)
         });
         if (res.ok) {
           const data = await res.json();
@@ -376,24 +385,31 @@ ${JSON.stringify(todos)}
   // 4. 타임트래커 심층 분석 리포트 & 다음 달 목표 역산 설계
   if (action === 'analyze_report') {
     const { monthLabel = '', statsSummary = {}, userGoalWish = '', categories = [] } = payload;
-    const prompt = `당신은 사용자의 타임트래커(계획 vs 실제 사용 시간)와 루틴 데이터를 분석하여 피드백 보고서와 다음 달 목표 시간 예산을 짜주는 전문 시간관리 코치입니다.
+    const slimCats = Array.isArray(categories)
+      ? categories.map(c => ({ id: c.id, name: c.name }))
+      : [];
+    const prompt = `당신은 타임트래커 데이터를 분석해 핵심 코칭과 다음 달 목표 시간 예산을 제안하는 전문 시간관리 코치입니다.
 
-- 분석 대상 월: ${monthLabel}
-- 카테고리 목록: ${JSON.stringify(categories)}
-- 이번 달 집계 데이터(계획 시간, 실제 기록 시간, 루틴 달성률 등):
-${JSON.stringify(statsSummary)}
-- 사용자의 다음 달 희망 사항: "${userGoalWish || '균형 잡힌 성장을 원함'}"
+- 분석 대상 기간: ${monthLabel}
+- 카테고리: ${JSON.stringify(slimCats)}
+- 해당 기간 집계 데이터: ${JSON.stringify(statsSummary)}
+- 다음 달 희망 사항: "${userGoalWish || '균형 잡힌 성장을 원함'}"
+
+지침:
+1. 반드시 분석 대상 기간인 "${monthLabel}"의 실제 수치와 카테고리별 차이를 직접 언급하여 기간마다 차별화된 진단을 작성하세요.
+2. 기록이 0시간인 기간이라면 기록 공백 상태임을 짚어주고 희망 사항 중심의 초기 시간 예산을 설계하세요.
+3. 각 항목은 핵심만 간결하게 1~2문장으로 작성하세요.
 
 반드시 아래 JSON 형식으로만 응답하세요:
 {
-  "headline": "이번 달 시간 사용 패턴을 관통하는 핵심 한 줄 총평",
-  "timeLeakAnalysis": "계획 대비 실제 시간 차이와 시간이 새고 있는 구간에 대한 구체적 진단 (2~3문장)",
-  "goldenTimeAnalysis": "집중도와 실행률이 높은 시간대 및 루틴 수행 강점 분석 (2문장)",
-  "keep": "이번 달 잘 지켰고 다음 달에도 유지할 점",
-  "problem": "이번 달 아쉬웠거나 계획 오류가 컸던 점",
-  "tryAction": "다음 달에 당장 실천할 구체적 행동 전략",
+  "headline": "해당 기간 시간 사용 패턴을 관통하는 핵심 한 줄 총평",
+  "timeLeakAnalysis": "계획 대비 실제 시간 차이와 시간 누수 구간 진단",
+  "goldenTimeAnalysis": "집중 시간대 및 루틴 실행 강점 분석",
+  "keep": "잘 지켰고 유지할 점",
+  "problem": "아쉬웠거나 개선이 필요한 점",
+  "tryAction": "다음 달 실천할 구체적 행동 전략",
   "recommendedBudgets": [
-    { "categoryId": "카테고리ID", "monthlyHours": 20, "reason": "추천 이유 한 줄" }
+    { "categoryId": "카테고리ID", "monthlyHours": 20, "reason": "추천 이유" }
   ],
   "recommendedGoals": [
     "다음 달 핵심 실천 목표 1",
@@ -404,8 +420,12 @@ ${JSON.stringify(statsSummary)}
 
     const res = await generateWithFallback(apiKeys, {
       contents: [{ role: 'user', parts: [{ text: prompt }] }],
-      generationConfig: { responseMimeType: 'application/json', temperature: 0.4 }
-    }, 15000);
+      generationConfig: {
+        responseMimeType: 'application/json',
+        temperature: 0.35,
+        maxOutputTokens: 900
+      }
+    }, 8500);
 
     if (!res.ok) return jsonResponse({ ok: false, error: res.error }, 502);
     const parsed = parseJsonSafe(extractCandidateText(res.data));
