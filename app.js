@@ -48,26 +48,28 @@
     const [y, m, d] = dateStr.split('-').map(Number);
     const base = new Date(y, m - 1, d);
     const dayOfWeek = base.getDay();
-    const sunday = new Date(y, m - 1, d - dayOfWeek);
-    const saturday = new Date(y, m - 1, d - dayOfWeek + 6);
+    const diffToMonday = dayOfWeek === 0 ? -6 : 1 - dayOfWeek;
+    const monday = new Date(y, m - 1, d + diffToMonday);
+    const sunday = new Date(monday.getFullYear(), monday.getMonth(), monday.getDate() + 6);
     const dayNames = ['일', '월', '화', '수', '목', '금', '토'];
     const days = [];
     for (let i = 0; i < 7; i++) {
-      const cur = new Date(sunday.getFullYear(), sunday.getMonth(), sunday.getDate() + i);
+      const cur = new Date(monday.getFullYear(), monday.getMonth(), monday.getDate() + i);
+      const dow = cur.getDay();
       days.push({
         dateObj: cur,
         dateStr: toDateStr(cur),
-        dayName: dayNames[i],
-        dayIdx: i,
+        dayName: dayNames[dow],
+        dayIdx: dow,
         monthDayLabel: `${cur.getMonth() + 1}/${cur.getDate()}`
       });
     }
     return {
+      monday,
       sunday,
-      saturday,
-      sundayStr: toDateStr(sunday),
-      saturdayStr: toDateStr(saturday),
-      titleLabel: `${sunday.getMonth() + 1}월 ${sunday.getDate()}일 ~ ${saturday.getMonth() + 1}월 ${saturday.getDate()}일`,
+      startStr: toDateStr(monday),
+      endStr: toDateStr(sunday),
+      titleLabel: `${monday.getMonth() + 1}월 ${monday.getDate()}일 ~ ${sunday.getMonth() + 1}월 ${sunday.getDate()}일`,
       days
     };
   }
@@ -3327,6 +3329,15 @@
       const boardGrid = document.getElementById('weekMatrixGrid');
       const timetableWrap = document.getElementById('weekTimetableWrap');
 
+      const formatWeekSummaryLine = wStats => {
+        if (!wStats) return '';
+        const ratePart =
+          wStats.totalPlanMins > 0
+            ? ` · 실행률 ${Math.min(999, Math.round((wStats.totalActualMins / wStats.totalPlanMins) * 100))}%`
+            : '';
+        return `계획 ${formatDurationKo(wStats.totalPlanMins)} · 실행 ${formatDurationKo(wStats.totalActualMins)}${ratePart} · 마감 ${wStats.totalTodos}건`;
+      };
+
       if (calWeekLayout === 'timetable') {
         boardScrollWrap?.classList.add('hidden');
         boardGrid.classList.add('hidden');
@@ -3334,7 +3345,7 @@
         const wStats = renderWeeklyTimetableInto(timetableWrap, weekInfo, calWeekMode);
         const wSummaryEl = document.getElementById('calWeekSummaryBadges');
         if (wSummaryEl && wStats) {
-          wSummaryEl.textContent = `계획 ${formatDurationKo(wStats.totalPlanMins)} · 실행 ${formatDurationKo(wStats.totalActualMins)} · 마감 ${wStats.totalTodos}건`;
+          wSummaryEl.textContent = formatWeekSummaryLine(wStats);
         }
       } else {
         boardScrollWrap?.classList.remove('hidden');
@@ -3343,7 +3354,7 @@
         const wStats = renderWeeklyBoardInto(boardGrid, weekInfo, calWeekMode, false);
         const wSummaryEl = document.getElementById('calWeekSummaryBadges');
         if (wSummaryEl && wStats) {
-          wSummaryEl.textContent = `계획 ${formatDurationKo(wStats.totalPlanMins)} · 실행 ${formatDurationKo(wStats.totalActualMins)} · 마감 ${wStats.totalTodos}건`;
+          wSummaryEl.textContent = formatWeekSummaryLine(wStats);
         }
       }
     }
@@ -3446,7 +3457,7 @@
       const stack = document.createElement('div');
       stack.className = 'mc-items-stack';
 
-      const maxVisible = isCompact ? 3 : 5;
+      const maxVisible = isCompact ? 3 : Infinity;
       let renderedCount = 0;
 
       // 1. 할 일 마감 렌더링 (focus, all, deadline 모드)
@@ -3698,17 +3709,19 @@
         const cat = getCategoryById(item.categoryId);
         const isPlanDone = isItemCompletedOnDate(item, dStr);
         const isRecurring = item.repeat && item.repeat !== 'none';
+        const timeText = mode === 'both' ? item.startTime : `${item.startTime}~${item.endTime}`;
         const card = document.createElement('div');
         card.className = `wk-item-card wk-plan-card ${isPlanDone ? 'is-done' : ''}`;
         card.style.borderLeftColor = cat.color;
+        card.title = `${item.startTime}~${item.endTime} ${item.title}`;
         card.innerHTML = `
           <div class="wk-card-top">
             <label class="wk-check-wrap" title="완료 체크 시 실행 시간에 자동 반영됩니다">
               <input type="checkbox" class="wk-inline-check" ${isPlanDone ? 'checked' : ''} />
-              <span class="wk-time-range">${item.startTime}~${item.endTime}</span>
+              <span class="wk-time-range">${isRecurring && mode === 'both' ? '↻ ' : ''}${timeText}</span>
             </label>
             <span class="wk-card-flags">
-              ${isRecurring ? '<span class="wk-mini-flag">반복</span>' : ''}
+              ${isRecurring && mode !== 'both' ? '<span class="wk-mini-flag">반복</span>' : ''}
               ${item.important ? '<span class="important-star">★</span>' : ''}
             </span>
           </div>
@@ -3732,13 +3745,15 @@
       const createActualCard = item => {
         const cat = getCategoryById(item.categoryId);
         const dur = durationMinutes(item.startTime, item.endTime);
+        const timeText = mode === 'both' ? item.startTime : `${item.startTime}~${item.endTime}`;
         const card = document.createElement('div');
         card.className = 'wk-item-card wk-actual-card';
         card.style.borderLeftColor = cat.color;
         card.style.background = `${cat.color}14`;
+        card.title = `${item.startTime}~${item.endTime} · ${dur}분 · ${item.title}`;
         card.innerHTML = `
           <div class="wk-card-top">
-            <span class="wk-time-range">${item.startTime}~${item.endTime}</span>
+            <span class="wk-time-range">${timeText}</span>
             <span class="wk-dur-label" style="color:${cat.color}">${dur}분</span>
           </div>
           <div class="wk-card-title">${escapeHtml(item.title)}</div>
@@ -3835,48 +3850,16 @@
       grid.appendChild(col);
     });
 
-    if (!isCompact) {
-      const rate = totalPlanMins > 0 ? Math.min(999, Math.round((totalActualMins / totalPlanMins) * 100)) : 0;
-      const summaryCol = document.createElement('div');
-      summaryCol.className = 'week-day-col week-summary-card';
-      summaryCol.innerHTML = `
-        <div class="week-day-head">
-          <div class="wk-head-left">
-            <span class="wk-day-title">이번 주 요약</span>
-          </div>
-          <span class="wk-today-pill">7일 합계</span>
-        </div>
-        <div class="wk-summary-metrics">
-          <div class="wk-sum-row">
-            <span class="wk-sum-label">계획 시간</span>
-            <strong class="wk-sum-val plan">${formatShortDurationKo(totalPlanMins)}</strong>
-          </div>
-          <div class="wk-sum-row">
-            <span class="wk-sum-label">실행 시간</span>
-            <strong class="wk-sum-val actual">${formatShortDurationKo(totalActualMins)}</strong>
-          </div>
-          <div class="wk-sum-row">
-            <span class="wk-sum-label">시간 실행률</span>
-            <strong class="wk-sum-val">${rate}%</strong>
-          </div>
-          <div class="wk-sum-row">
-            <span class="wk-sum-label">주간 마감 할 일</span>
-            <strong class="wk-sum-val">${totalTodos}건</strong>
-          </div>
-        </div>
-      `;
-      grid.appendChild(summaryCol);
-    }
-
     return { totalPlanMins, totalActualMins, totalTodos };
   }
 
-  // 주별 시간대별 표 (06:00~23:00 × 7일 그리드) 렌더러
+  // 주별 시간대별 표 (06:00~23:00 × 월~일 7일 · 요일별 계획/실행 2열 분리) 렌더러
   function renderWeeklyTimetableInto(container, weekInfo, mode = 'both') {
     if (!container) return { totalPlanMins: 0, totalActualMins: 0, totalTodos: 0 };
     container.innerHTML = '';
 
     const todayStr = getTodayStr();
+    const nowHour = new Date().getHours();
     const showPlan = mode === 'both' || mode === 'plan';
     const showActual = mode === 'both' || mode === 'actual';
 
@@ -3885,7 +3868,7 @@
     let totalTodos = 0;
 
     const table = document.createElement('div');
-    table.className = 'wk-timetable-grid';
+    table.className = `wk-timetable-grid ${mode === 'both' ? 'is-dual-mode' : 'is-single-mode'}`;
 
     // 1. 헤더 행 및 요일·시간대별 인덱스 사전 구성
     const headRow = document.createElement('div');
@@ -3895,6 +3878,7 @@
     let minWeekHour = 6;
     const plansByDayHour = new Map();
     const actualsByDayHour = new Map();
+    const hasTodayInWeek = weekInfo.days.some(d => d.dateStr === todayStr);
 
     weekInfo.days.forEach(dayObj => {
       const dStr = dayObj.dateStr;
@@ -3931,19 +3915,105 @@
       totalTodos += dayTodos.length;
 
       const hCell = document.createElement('div');
-      hCell.className = `wk-tt-day-head ${dStr === todayStr ? 'is-today' : ''}`;
-      let subStat = '';
-      if (mode === 'both') subStat = `계획 ${formatShortDurationKo(pMins)} · 실행 ${formatShortDurationKo(aMins)}`;
-      else if (mode === 'plan') subStat = `계획 ${formatShortDurationKo(pMins)}`;
-      else subStat = `실행 ${formatShortDurationKo(aMins)}`;
+      hCell.className = [
+        'wk-tt-day-head',
+        dStr === todayStr ? 'is-today' : '',
+        dayObj.dayIdx === 0 ? 'is-sun' : dayObj.dayIdx === 6 ? 'is-sat' : ''
+      ]
+        .filter(Boolean)
+        .join(' ');
 
-      hCell.innerHTML = `
-        <div class="wk-tt-day-label">${dayObj.monthDayLabel} ${dayObj.dayName}</div>
-        <div class="wk-tt-day-sub">${subStat}</div>
-      `;
+      if (mode === 'both') {
+        hCell.innerHTML = `
+          <div class="wk-tt-day-top">
+            <span class="wk-tt-day-label">${dayObj.monthDayLabel} ${dayObj.dayName}</span>
+            ${dStr === todayStr ? '<span class="wk-tt-today-pill">오늘</span>' : ''}
+          </div>
+          <div class="wk-tt-subhead-split">
+            <span class="wk-tt-subcol plan">계획${pMins > 0 ? ` ${formatShortDurationKo(pMins)}` : ''}</span>
+            <span class="wk-tt-subcol actual">실행${aMins > 0 ? ` ${formatShortDurationKo(aMins)}` : ''}</span>
+          </div>
+        `;
+      } else {
+        const subStat =
+          mode === 'plan'
+            ? `계획 ${formatShortDurationKo(pMins)}`
+            : `실행 ${formatShortDurationKo(aMins)}`;
+        hCell.innerHTML = `
+          <div class="wk-tt-day-top">
+            <span class="wk-tt-day-label">${dayObj.monthDayLabel} ${dayObj.dayName}</span>
+            ${dStr === todayStr ? '<span class="wk-tt-today-pill">오늘</span>' : ''}
+          </div>
+          <div class="wk-tt-day-sub">${subStat}</div>
+        `;
+      }
       headRow.appendChild(hCell);
     });
     table.appendChild(headRow);
+
+    const buildPlanChip = (p, dStr, compactTime = false) => {
+      const cat = getCategoryById(p.categoryId);
+      const isPlanDone = isItemCompletedOnDate(p, dStr);
+      const dur = durationMinutes(p.startTime, p.endTime);
+      const chip = document.createElement('div');
+      chip.className = `wk-tt-chip plan ${isPlanDone ? 'is-done' : ''}`;
+      chip.style.borderLeftColor = cat.color;
+      chip.title = `${p.startTime}~${p.endTime} · ${dur}분 · ${p.title}`;
+      const timeLabel = compactTime
+        ? `${p.repeat && p.repeat !== 'none' ? '↻ ' : ''}${p.startTime}~${p.endTime}`
+        : `${p.repeat && p.repeat !== 'none' ? '↻' : '계획'} ${p.startTime}~${p.endTime} · ${dur}분`;
+      chip.innerHTML = `
+        <span class="wk-tt-chip-tag plan">${timeLabel}</span>
+        <span class="wk-tt-chip-title">${p.important ? '★ ' : ''}${escapeHtml(p.title)}</span>
+      `;
+      chip.addEventListener('click', e => {
+        e.stopPropagation();
+        if (e.target.closest('.tb-resize-handle') || isJustDraggedOrResized()) return;
+        openItemModalForEdit('schedule', p);
+      });
+      makeItemDraggable(chip, 'schedule', p, dStr);
+      const tagEl = chip.querySelector('.wk-tt-chip-tag');
+      attachDurationResizeHandle(chip, p, (previewEnd, previewDur) => {
+        if (tagEl) {
+          tagEl.textContent = compactTime
+            ? `${p.repeat && p.repeat !== 'none' ? '↻ ' : ''}${p.startTime}~${previewEnd}`
+            : `${p.repeat && p.repeat !== 'none' ? '↻' : '계획'} ${p.startTime}~${previewEnd} · ${previewDur}분`;
+        }
+      });
+      return chip;
+    };
+
+    const buildActualChip = (a, dStr, compactTime = false) => {
+      const cat = getCategoryById(a.categoryId);
+      const dur = durationMinutes(a.startTime, a.endTime);
+      const chip = document.createElement('div');
+      chip.className = 'wk-tt-chip actual';
+      chip.style.borderLeftColor = cat.color;
+      chip.style.background = `${cat.color}18`;
+      chip.title = `${a.startTime}~${a.endTime} · ${dur}분 · ${a.title}`;
+      const timeLabel = compactTime
+        ? `${a.startTime}~${a.endTime}`
+        : `실행 ${a.startTime}~${a.endTime} · ${dur}분`;
+      chip.innerHTML = `
+        <span class="wk-tt-chip-tag actual">${timeLabel}</span>
+        <span class="wk-tt-chip-title">${escapeHtml(a.title)}</span>
+      `;
+      chip.addEventListener('click', e => {
+        e.stopPropagation();
+        if (e.target.closest('.tb-resize-handle') || isJustDraggedOrResized()) return;
+        openItemModalForEdit('actual', a);
+      });
+      makeItemDraggable(chip, 'actual', a, dStr);
+      const tagEl = chip.querySelector('.wk-tt-chip-tag');
+      attachDurationResizeHandle(chip, a, (previewEnd, previewDur) => {
+        if (tagEl) {
+          tagEl.textContent = compactTime
+            ? `${a.startTime}~${previewEnd}`
+            : `실행 ${a.startTime}~${previewEnd} · ${previewDur}분`;
+        }
+      });
+      return chip;
+    };
 
     // 2. 시간 행 (조기 일정이 있으면 06시 이전부터 자동 표시)
     const rowsFrag = document.createDocumentFragment();
@@ -3951,7 +4021,7 @@
       const hourStr = `${String(hour).padStart(2, '0')}:00`;
       const nextHourStr = hour === 23 ? '23:59' : `${String(hour + 1).padStart(2, '0')}:00`;
       const row = document.createElement('div');
-      row.className = 'wk-tt-row';
+      row.className = `wk-tt-row ${hasTodayInWeek && hour === nowHour ? 'is-current-hour' : ''}`;
 
       const timeCell = document.createElement('div');
       timeCell.className = 'wk-tt-time-cell';
@@ -3960,79 +4030,67 @@
 
       weekInfo.days.forEach(dayObj => {
         const dStr = dayObj.dateStr;
-        const slot = document.createElement('div');
-        slot.className = `wk-tt-slot ${dStr === todayStr ? 'is-today-col' : ''}`;
-        makeSlotDroppable(slot, {
-          targetType: mode === 'actual' ? 'actual' : 'schedule',
-          targetDate: dStr,
-          targetHour: hour
-        });
+        const plansInHour = plansByDayHour.get(dStr)?.[hour] || [];
+        const actualsInHour = actualsByDayHour.get(dStr)?.[hour] || [];
 
-        if (showPlan) {
-          const plansInHour = plansByDayHour.get(dStr)?.[hour] || [];
-          plansInHour.forEach(p => {
-            const cat = getCategoryById(p.categoryId);
-            const isPlanDone = isItemCompletedOnDate(p, dStr);
-            const dur = durationMinutes(p.startTime, p.endTime);
-            const chip = document.createElement('div');
-            chip.className = `wk-tt-chip plan ${isPlanDone ? 'is-done' : ''}`;
-            chip.style.borderLeftColor = cat.color;
-            chip.innerHTML = `
-              <span class="wk-tt-chip-tag plan">${p.repeat && p.repeat !== 'none' ? '↻' : '계획'} ${p.startTime}~${p.endTime} · ${dur}분</span>
-              <span class="wk-tt-chip-title">${p.important ? '★ ' : ''}${escapeHtml(p.title)}</span>
-            `;
-            chip.addEventListener('click', e => {
-              e.stopPropagation();
-              if (e.target.closest('.tb-resize-handle') || isJustDraggedOrResized()) return;
-              openItemModalForEdit('schedule', p);
-            });
-            makeItemDraggable(chip, 'schedule', p, dStr);
-            const tagEl = chip.querySelector('.wk-tt-chip-tag');
-            attachDurationResizeHandle(chip, p, (previewEnd, previewDur) => {
-              if (tagEl) {
-                tagEl.textContent = `${p.repeat && p.repeat !== 'none' ? '↻' : '계획'} ${p.startTime}~${previewEnd} · ${previewDur}분`;
-              }
-            });
-            slot.appendChild(chip);
+        if (mode === 'both') {
+          const dayPair = document.createElement('div');
+          dayPair.className = `wk-tt-day-pair ${dStr === todayStr ? 'is-today-col' : ''}`;
+
+          const planSlot = document.createElement('div');
+          planSlot.className = 'wk-tt-subslot plan-slot';
+          planSlot.title = `${dayObj.monthDayLabel} ${hourStr} 계획 일정 추가`;
+          makeSlotDroppable(planSlot, {
+            targetType: 'schedule',
+            targetDate: dStr,
+            targetHour: hour
           });
-        }
-
-        if (showActual) {
-          const actualsInHour = actualsByDayHour.get(dStr)?.[hour] || [];
-          actualsInHour.forEach(a => {
-            const cat = getCategoryById(a.categoryId);
-            const dur = durationMinutes(a.startTime, a.endTime);
-            const chip = document.createElement('div');
-            chip.className = 'wk-tt-chip actual';
-            chip.style.borderLeftColor = cat.color;
-            chip.style.background = `${cat.color}18`;
-            chip.innerHTML = `
-              <span class="wk-tt-chip-tag actual">실행 ${a.startTime}~${a.endTime} · ${dur}분</span>
-              <span class="wk-tt-chip-title">${escapeHtml(a.title)}</span>
-            `;
-            chip.addEventListener('click', e => {
-              e.stopPropagation();
-              if (e.target.closest('.tb-resize-handle') || isJustDraggedOrResized()) return;
-              openItemModalForEdit('actual', a);
-            });
-            makeItemDraggable(chip, 'actual', a, dStr);
-            const tagEl = chip.querySelector('.wk-tt-chip-tag');
-            attachDurationResizeHandle(chip, a, (previewEnd, previewDur) => {
-              if (tagEl) {
-                tagEl.textContent = `실행 ${a.startTime}~${previewEnd} · ${previewDur}분`;
-              }
-            });
-            slot.appendChild(chip);
+          plansInHour.forEach(p => planSlot.appendChild(buildPlanChip(p, dStr, true)));
+          planSlot.addEventListener('click', () => {
+            if (isJustDraggedOrResized()) return;
+            selectedDate = dStr;
+            openItemModalForCreate('schedule', hourStr, nextHourStr);
           });
+
+          const actualSlot = document.createElement('div');
+          actualSlot.className = 'wk-tt-subslot actual-slot';
+          actualSlot.title = `${dayObj.monthDayLabel} ${hourStr} 실행 기록 추가`;
+          makeSlotDroppable(actualSlot, {
+            targetType: 'actual',
+            targetDate: dStr,
+            targetHour: hour
+          });
+          actualsInHour.forEach(a => actualSlot.appendChild(buildActualChip(a, dStr, true)));
+          actualSlot.addEventListener('click', () => {
+            if (isJustDraggedOrResized()) return;
+            selectedDate = dStr;
+            openItemModalForCreate('actual', hourStr, nextHourStr);
+          });
+
+          dayPair.appendChild(planSlot);
+          dayPair.appendChild(actualSlot);
+          row.appendChild(dayPair);
+        } else {
+          const slot = document.createElement('div');
+          slot.className = `wk-tt-slot ${dStr === todayStr ? 'is-today-col' : ''}`;
+          makeSlotDroppable(slot, {
+            targetType: mode === 'actual' ? 'actual' : 'schedule',
+            targetDate: dStr,
+            targetHour: hour
+          });
+          if (showPlan) {
+            plansInHour.forEach(p => slot.appendChild(buildPlanChip(p, dStr, false)));
+          }
+          if (showActual) {
+            actualsInHour.forEach(a => slot.appendChild(buildActualChip(a, dStr, false)));
+          }
+          slot.addEventListener('click', () => {
+            if (isJustDraggedOrResized()) return;
+            selectedDate = dStr;
+            openItemModalForCreate(mode === 'actual' ? 'actual' : 'schedule', hourStr, nextHourStr);
+          });
+          row.appendChild(slot);
         }
-
-        slot.addEventListener('click', () => {
-          if (isJustDraggedOrResized()) return;
-          selectedDate = dStr;
-          openItemModalForCreate(mode === 'actual' ? 'actual' : 'schedule', hourStr, nextHourStr);
-        });
-
-        row.appendChild(slot);
       });
 
       rowsFrag.appendChild(row);
