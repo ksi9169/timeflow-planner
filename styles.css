@@ -239,28 +239,84 @@ button, input, select, textarea {
   color: var(--primary);
 }
 
-/* ==================== 초고속 스마트 입력 바 ==================== */
+/* ==================== 심플 1줄 빠른 입력 바 ==================== */
 .quick-input-bar {
-  max-width: 1560px;
-  margin: 14px auto 0;
+  max-width: 1320px;
+  margin: 12px auto 0;
   padding: 0 20px;
 }
 
 .quick-input-inner {
   background: var(--bg-card);
-  border: 2px solid #C7D2FE;
-  border-radius: var(--radius-lg);
-  padding: 10px 14px;
+  border: 1.5px solid var(--border-strong);
+  border-radius: 14px;
+  padding: 7px 10px 7px 14px;
   display: flex;
   align-items: center;
   gap: 10px;
-  box-shadow: var(--shadow-md);
-  flex-wrap: wrap;
+  box-shadow: var(--shadow-sm);
+  transition: border-color 0.16s ease, box-shadow 0.16s ease;
 }
 
-.quick-input-inner:focus-within {
+.quick-input-bar:focus-within .quick-input-inner,
+.quick-input-bar.has-value .quick-input-inner {
   border-color: var(--primary);
-  box-shadow: 0 0 0 4px rgba(79, 70, 229, 0.12);
+  box-shadow: 0 0 0 3px rgba(79, 70, 229, 0.1);
+}
+
+.quick-plus-icon {
+  color: var(--text-muted);
+  flex-shrink: 0;
+  transition: color 0.15s;
+}
+
+.quick-input-bar:focus-within .quick-plus-icon {
+  color: var(--primary);
+}
+
+.quick-text-wrap {
+  flex: 1;
+  min-width: 160px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.quick-text-wrap input {
+  width: 100%;
+  border: none;
+  outline: none;
+  font-size: 0.93rem;
+  padding: 6px 2px;
+  color: var(--text-main);
+  background: transparent;
+}
+
+.quick-btn-wrap {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-shrink: 0;
+}
+
+.btn-compact {
+  padding: 7px 13px !important;
+  font-size: 0.83rem !important;
+  border-radius: 9px !important;
+}
+
+.quick-extra-drawer {
+  display: none;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 6px 2px;
+  flex-wrap: wrap;
+  font-size: 0.79rem;
+}
+
+.quick-input-bar:focus-within .quick-extra-drawer,
+.quick-input-bar.has-value .quick-extra-drawer {
+  display: flex;
 }
 
 .quick-type-wrap {
@@ -270,59 +326,30 @@ button, input, select, textarea {
 }
 
 .quick-type-wrap select {
-  padding: 8px 10px;
-  border-radius: var(--radius-sm);
+  padding: 5px 9px;
+  border-radius: 7px;
   border: 1px solid var(--border-color);
-  background: var(--bg-subtle);
-  font-size: 0.85rem;
+  background: var(--bg-card);
+  font-size: 0.8rem;
   font-weight: 600;
   color: var(--text-main);
   cursor: pointer;
 }
 
-.quick-text-wrap {
-  flex: 1;
-  min-width: 240px;
-}
-
-.quick-text-wrap input {
-  width: 100%;
-  border: none;
-  outline: none;
-  font-size: 0.96rem;
-  padding: 8px 6px;
-  color: var(--text-main);
-  background: transparent;
-}
-
-.quick-btn-wrap {
+.quick-chips-inline {
   display: flex;
   align-items: center;
-  gap: 8px;
-}
-
-.quick-preset-row {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  padding: 8px 6px 0;
+  gap: 5px;
   flex-wrap: wrap;
-  font-size: 0.8rem;
-}
-
-.preset-guide {
-  color: var(--text-sub);
-  font-weight: 600;
-  margin-right: 2px;
 }
 
 .chip-btn {
   border: 1px solid var(--border-color);
   background: var(--bg-card);
   color: var(--text-sub);
-  padding: 3px 10px;
+  padding: 3px 9px;
   border-radius: 999px;
-  font-size: 0.78rem;
+  font-size: 0.76rem;
   font-weight: 600;
   cursor: pointer;
   transition: all 0.15s;
@@ -338,7 +365,7 @@ button, input, select, textarea {
   margin-left: auto;
   color: var(--primary);
   font-weight: 600;
-  font-size: 0.8rem;
+  font-size: 0.78rem;
 }
 
 /* ==================== 공통 버튼 스타일 ==================== */
@@ -472,8 +499,8 @@ button:disabled {
 
 /* ==================== 메인 컨테이너 및 탭 뷰 ==================== */
 .main-container {
-  max-width: 1560px;
-  margin: 14px auto 48px;
+  max-width: 1320px;
+  margin: 12px auto 48px;
   padding: 0 20px;
 }
 
@@ -485,109 +512,29 @@ button:disabled {
   display: block;
 }
 
-/* ==================== KPI 4종 그리드 ==================== */
-.kpi-grid {
+/* ==================== PC 2열 심플 플래너 / 모바일 접이식 레이아웃 ==================== */
+.dashboard-two-col {
   display: grid;
-  grid-template-columns: repeat(4, 1fr);
-  gap: 14px;
-  margin-bottom: 16px;
-}
-
-.kpi-card {
-  background: var(--bg-card);
-  border: 1px solid var(--border-color);
-  border-radius: var(--radius-md);
-  padding: 14px 16px;
-  box-shadow: var(--shadow-sm);
-}
-
-.kpi-header {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  margin-bottom: 6px;
-}
-
-.kpi-label {
-  font-size: 0.82rem;
-  font-weight: 700;
-  color: var(--text-sub);
-}
-
-.kpi-badge {
-  font-size: 0.73rem;
-  font-weight: 700;
-  padding: 2px 8px;
-  border-radius: 999px;
-  background: var(--primary-soft);
-  color: var(--primary);
-}
-.kpi-badge.accent {
-  background: var(--teal-soft);
-  color: var(--teal);
-}
-.kpi-badge.warm {
-  background: var(--amber-soft);
-  color: #B45309;
-}
-.kpi-badge.green {
-  background: var(--success-soft);
-  color: #047857;
-}
-
-.kpi-value-row {
-  display: flex;
-  align-items: baseline;
-  justify-content: space-between;
-  gap: 8px;
-  margin-bottom: 8px;
-}
-
-.kpi-number {
-  font-size: 1.4rem;
-  font-weight: 800;
-  color: var(--text-main);
-}
-
-.kpi-sub {
-  font-size: 0.78rem;
-  color: var(--text-sub);
-}
-
-.kpi-hint {
-  font-size: 0.75rem;
-  color: var(--text-muted);
-}
-
-.progress-bar-bg {
-  width: 100%;
-  height: 7px;
-  background: var(--bg-subtle);
-  border-radius: 999px;
-  overflow: hidden;
-}
-
-.progress-bar-fill {
-  height: 100%;
-  background: var(--primary);
-  border-radius: 999px;
-  transition: width 0.3s ease;
-}
-.progress-bar-fill.teal { background: var(--teal); }
-.progress-bar-fill.amber { background: var(--amber); }
-
-/* ==================== 3단 대시보드 레이아웃 ==================== */
-.dashboard-three-col {
-  display: grid;
-  grid-template-columns: 330px minmax(420px, 1fr) 340px;
-  gap: 16px;
+  grid-template-columns: 360px minmax(0, 1fr);
+  gap: 18px;
   align-items: start;
 }
 
 .dash-col {
   display: flex;
   flex-direction: column;
-  gap: 16px;
+  gap: 14px;
+  min-width: 0;
+}
+
+.dash-left-collapsible {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+
+.mobile-today-summary-bar {
+  display: none;
 }
 
 .panel-card {
@@ -600,10 +547,14 @@ button:disabled {
 
 .panel-head {
   display: flex;
-  align-items: flex-start;
+  align-items: center;
   justify-content: space-between;
   gap: 10px;
   margin-bottom: 12px;
+}
+
+.panel-head.compact-head {
+  margin-bottom: 10px;
 }
 
 .panel-title {
@@ -2696,12 +2647,11 @@ button:disabled {
   align-items: center;
   justify-content: space-between;
   flex-wrap: wrap;
-  gap: 10px;
-  padding: 10px 14px;
-  margin-bottom: 14px;
-  background: linear-gradient(90deg, #EEF2FF 0%, #F0FDFA 100%);
-  border: 1px solid #C7D2FE;
-  border-radius: var(--radius-md);
+  gap: 8px;
+  padding: 0 2px;
+  margin-bottom: 12px;
+  background: transparent;
+  border: none;
 }
 
 .ptag-bar-left {
@@ -3327,8 +3277,8 @@ button:disabled {
 }
 
 [data-theme="dark"] .project-tag-bar {
-  background: linear-gradient(90deg, rgba(99, 102, 241, 0.16) 0%, rgba(20, 184, 166, 0.14) 100%);
-  border-color: rgba(99, 102, 241, 0.35);
+  background: transparent;
+  border: none;
 }
 
 [data-theme="dark"] .ptag-chip {
@@ -3419,18 +3369,389 @@ button:disabled {
   color: #FCD34D;
 }
 
-/* ==================== 반응형 미디어 쿼리 & 모바일 최적화 ==================== */
-@media (max-width: 1220px) {
-  .dashboard-three-col {
-    grid-template-columns: 1fr;
-  }
+/* ==================== 미니멀 개편 신규 컴포넌트 ==================== */
+.brand-text-col {
+  display: flex;
+  flex-direction: column;
+}
+
+.date-picker-trigger {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  cursor: pointer;
+  padding: 3px 8px;
+  border-radius: 8px;
+  transition: background 0.15s;
+}
+.date-picker-trigger:hover {
+  background: var(--bg-subtle);
+}
+
+.visually-hidden-date {
+  position: absolute;
+  inset: 0;
+  opacity: 0;
+  width: 100%;
+  height: 100%;
+  cursor: pointer;
+  border: none;
+}
+
+/* 오늘 남은 루틴 미니 스트립 */
+.compact-routine-card {
+  padding: 13px 15px;
+}
+
+.routine-compact-list {
+  display: flex;
+  flex-direction: column;
+  gap: 7px;
+}
+
+.routine-one-line {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 8px 10px;
+  border-radius: 9px;
+  border: 1px solid var(--border-color);
+  background: var(--bg-subtle);
+  cursor: pointer;
+  transition: border-color 0.15s, background 0.15s;
+}
+.routine-one-line:hover {
+  border-color: var(--primary);
+}
+
+.rol-left {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+  flex: 1;
+}
+
+.rol-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  flex-shrink: 0;
+}
+
+.rol-title {
+  font-size: 0.86rem;
+  font-weight: 700;
+  color: var(--text-main);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.rol-meta {
+  font-size: 0.75rem;
+  font-weight: 600;
+  color: var(--text-sub);
+  flex-shrink: 0;
+}
+
+/* 원클릭 타이머 실행 아이콘 버튼 */
+.icon-play-btn {
+  width: 28px;
+  height: 28px;
+  border-radius: 999px;
+  border: 1px solid rgba(13, 148, 136, 0.35);
+  background: var(--teal-soft);
+  color: var(--teal);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 0.72rem;
+  cursor: pointer;
+  flex-shrink: 0;
+  transition: all 0.14s ease;
+}
+.icon-play-btn:hover {
+  background: var(--teal);
+  border-color: var(--teal);
+  color: #FFFFFF;
+}
+
+.todo-item-card {
+  cursor: pointer;
+}
+
+/* 타임라인 블록 체크박스 및 심플 레이아웃 */
+.tb-left-row {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  min-width: 0;
+  flex: 1;
+}
+
+.tb-plan-check {
+  width: 16px;
+  height: 16px;
+  margin-top: 2px;
+  accent-color: var(--primary);
+  cursor: pointer;
+  flex-shrink: 0;
+}
+
+.timeline-block.is-completed-block {
+  opacity: 0.62;
+}
+.timeline-block.is-completed-block .tb-title {
+  text-decoration: line-through;
+}
+
+/* 필요할 때만 열리는 1줄 타이머 바 */
+.quick-timer-bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  flex-wrap: wrap;
+  padding: 9px 12px;
+  margin-bottom: 10px;
+  border-radius: 11px;
+  border: 1px solid #99F6E4;
+  background: var(--teal-soft);
+}
+
+.qtb-left {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.qtb-clock {
+  font-variant-numeric: tabular-nums;
+  font-size: 1.05rem;
+  font-weight: 800;
+  color: var(--teal);
+}
+
+.qtb-inputs {
+  flex: 1;
+  min-width: 220px;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+
+.qtb-inputs input[type="text"] {
+  flex: 1;
+  min-width: 130px;
+  padding: 6px 9px;
+  border-radius: 7px;
+  border: 1px solid var(--border-strong);
+  background: var(--bg-card);
+  font-size: 0.83rem;
+}
+
+#liveTrackerProjectTag {
+  flex: 0 1 105px;
+  min-width: 84px;
+}
+
+.qtb-inputs select {
+  padding: 6px 8px;
+  border-radius: 7px;
+  border: 1px solid var(--border-strong);
+  background: var(--bg-card);
+  font-size: 0.82rem;
+}
+
+.qtb-actions {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+/* 타임라인 상단 심플 요약 스트립 */
+.timeline-summary-strip {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 0 2px 8px;
+}
+
+.btn-link-subtle {
+  border: none;
+  background: transparent;
+  color: var(--teal);
+  font-size: 0.78rem;
+  font-weight: 700;
+  cursor: pointer;
+  padding: 2px 4px;
+}
+.btn-link-subtle:hover {
+  text-decoration: underline;
+}
+
+/* 리포트 접이식 상세 표 */
+.clean-details {
+  margin-top: 12px;
+  border: 1px solid var(--border-color);
+  border-radius: 10px;
+  background: var(--bg-subtle);
+  overflow: hidden;
+}
+
+.clean-details summary {
+  padding: 9px 13px;
+  font-size: 0.83rem;
+  font-weight: 700;
+  color: var(--text-sub);
+  cursor: pointer;
+  list-style: none;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+.clean-details summary::-webkit-details-marker {
+  display: none;
+}
+.clean-details summary::after {
+  content: '펼치기 ▾';
+  font-size: 0.75rem;
+  color: var(--primary);
+}
+.clean-details[open] summary::after {
+  content: '접기 ▴';
+}
+.clean-details .table-wrap {
+  padding: 0 10px 10px;
+  background: var(--bg-card);
+}
+
+/* 설정 모달 빠른 타일 그리드 */
+.settings-quick-grid {
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
+  gap: 8px;
+  margin-top: 8px;
+}
+
+.settings-tile-btn {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 2px;
+  padding: 10px 13px;
+  border-radius: 10px;
+  border: 1px solid var(--border-color);
+  background: var(--bg-subtle);
+  color: var(--text-main);
+  cursor: pointer;
+  text-align: left;
+  transition: border-color 0.14s, background 0.14s;
+}
+.settings-tile-btn:hover {
+  border-color: var(--primary);
+}
+.settings-tile-btn.active {
+  border-color: var(--primary);
+  background: var(--primary-soft);
+}
+.stb-label {
+  font-size: 0.73rem;
+  font-weight: 600;
+  color: var(--text-sub);
+}
+.settings-tile-btn strong {
+  font-size: 0.86rem;
+  font-weight: 800;
+}
+
+[data-theme="dark"] .quick-timer-bar {
+  background: rgba(20, 184, 166, 0.14);
+  border-color: rgba(20, 184, 166, 0.38);
+}
+
+[data-theme="dark"] .icon-play-btn {
+  background: rgba(20, 184, 166, 0.18);
+  border-color: rgba(45, 212, 191, 0.4);
+  color: #5EEAD4;
+}
+[data-theme="dark"] .icon-play-btn:hover {
+  background: var(--teal);
+  color: #0F172A;
+}
+
+/* ==================== 반응형 미디어 쿼리 & 모바일 안 B 최적화 ==================== */
+@media (max-width: 1120px) {
   .routines-two-col,
   .calendar-overview-layout,
   .report-two-col {
     grid-template-columns: 1fr;
   }
-  .kpi-grid {
-    grid-template-columns: repeat(2, 1fr);
+}
+
+@media (max-width: 920px) {
+  .dashboard-two-col {
+    grid-template-columns: 1fr;
+    gap: 10px;
+  }
+
+  .mobile-today-summary-bar {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 8px;
+    background: var(--bg-card);
+    border: 1px solid var(--border-color);
+    border-radius: 13px;
+    padding: 9px 12px;
+    box-shadow: var(--shadow-sm);
+  }
+
+  .mobile-drawer-toggle-btn {
+    flex: 1;
+    min-width: 0;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    border: none;
+    background: transparent;
+    color: var(--text-main);
+    cursor: pointer;
+    text-align: left;
+    padding: 2px 0;
+  }
+
+  .mds-dot {
+    width: 8px;
+    height: 8px;
+    border-radius: 50%;
+    background: var(--primary);
+    flex-shrink: 0;
+  }
+
+  .mds-text {
+    font-size: 0.86rem;
+    font-weight: 700;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+
+  .mds-chevron {
+    margin-left: auto;
+    font-size: 0.76rem;
+    font-weight: 700;
+    color: var(--primary);
+    flex-shrink: 0;
+  }
+
+  .dash-left-collapsible.is-collapsed {
+    display: none;
   }
 }
 
@@ -3485,11 +3806,11 @@ button:disabled {
   }
 
   .icon-pill-btn {
-    padding: 6px 10px;
-    font-size: 0.76rem;
+    padding: 6px 11px;
+    font-size: 0.78rem;
   }
 
-  /* iOS Safari 입력창 포커스 시 강제 화면 확대 방지 (16px 이상 보장) */
+  /* iOS Safari 입력창 포커스 시 강제 화면 확대 방지 */
   input:not([type="checkbox"]):not([type="radio"]):not([type="color"]),
   select,
   textarea {
@@ -3549,18 +3870,16 @@ button:disabled {
     padding: calc(8px + env(safe-area-inset-top, 0px)) 14px 8px;
   }
   .app-header {
-    padding: calc(12px + env(safe-area-inset-top, 0px)) 14px 12px;
+    padding: calc(10px + env(safe-area-inset-top, 0px)) 14px 10px;
   }
   .active-timer-banner:not(.hidden) + .app-header {
-    padding-top: 12px;
+    padding-top: 10px;
   }
   .main-container, .quick-input-bar {
     padding: 0 12px;
   }
-  .kpi-grid {
-    grid-template-columns: 1fr;
-  }
-  .donut-and-legend {
+  .donut-and-legend,
+  .settings-quick-grid {
     grid-template-columns: 1fr;
   }
   .dual-timeline-header,
@@ -3572,18 +3891,12 @@ button:disabled {
     grid-template-columns: 46px minmax(0, 1fr);
   }
   .timeline-block {
-    flex-direction: column;
-    align-items: stretch;
-    gap: 5px;
-    padding: 6px 8px 14px;
+    padding: 6px 8px 13px;
   }
   .tb-title {
     white-space: normal;
     word-break: keep-all;
     line-height: 1.3;
-  }
-  .tb-actions {
-    justify-content: flex-start;
   }
   .week-matrix-grid,
   .dash-week-grid {
