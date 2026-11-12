@@ -119,6 +119,17 @@
     return `${h}시간 ${m}분`;
   }
 
+  function formatShortDurationKo(mins) {
+    const rounded = Math.round(mins);
+    if (rounded <= 0) return '0분';
+    if (rounded < 60) return `${rounded}분`;
+    const h = Math.floor(rounded / 60);
+    const m = rounded % 60;
+    if (m === 0) return `${h}시간`;
+    if (m === 30) return `${h}.5시간`;
+    return `${h}시간 ${m}분`;
+  }
+
   function formatDateHeadingKo(dateStr) {
     const [y, m, d] = dateStr.split('-').map(Number);
     const dt = new Date(y, m - 1, d);
@@ -685,6 +696,8 @@
   let calWeekLayout = 'board';
   let calMonthMode = 'focus';
   let currentMilestoneFilter = 'all';
+  let calSideOpen = false;
+  let calToolsOpen = false;
 
   let currentTodoFilter = 'today';
   let currentReportPeriod = 'thisMonth';
@@ -2563,13 +2576,16 @@
             <span class="rmc-title">${escapeHtml(rtn.name)}</span>
             <span class="cat-dot-tag" style="background:${cat.color}20;color:${cat.color}">${escapeHtml(cat.name)}</span>
           </div>
-          <div class="rmc-meta">${escapeHtml(daysLabel)} · 권장 시작 ${rtn.startTime} · 총 ${totalMins}분 · ${rtn.steps.length}개 행동</div>
-          <div class="rmc-steps-preview">
-            ${rtn.steps.map((s, idx) => `<span class="rmc-step-chip">${idx + 1}. ${escapeHtml(s.title)} · ${s.minutes}분</span>`).join('')}
-          </div>
+          <div class="rmc-meta">${escapeHtml(daysLabel)} · ${rtn.startTime} · 총 ${totalMins}분 · ${rtn.steps.length}단계</div>
+          <details class="rmc-steps-details">
+            <summary class="rmc-steps-summary">행동 순서 보기</summary>
+            <div class="rmc-steps-preview">
+              ${rtn.steps.map((s, idx) => `<span class="rmc-step-chip">${idx + 1}. ${escapeHtml(s.title)} · ${s.minutes}분</span>`).join('')}
+            </div>
+          </details>
           <div class="rmc-foot">
-            <button type="button" class="btn-xs btn-outline studio-edit-btn">단계 편집</button>
-            <button type="button" class="btn-xs btn-primary studio-start-btn">플레이어에서 시작</button>
+            <button type="button" class="btn-xs btn-outline studio-edit-btn">편집</button>
+            <button type="button" class="btn-xs btn-primary studio-start-btn">루틴 시작</button>
           </div>
         `;
         card.querySelector('.studio-start-btn').addEventListener('click', () => {
@@ -2951,6 +2967,27 @@
   }
 
   // -------------------- 탭 3: 주간 · 월간 전체 조망 및 공통 주별/월별 렌더러 --------------------
+  function syncCalendarPanelsUI() {
+    const layoutEl = document.getElementById('calendarOverviewLayout');
+    const sideEl = document.getElementById('calendarSidePanel');
+    const msBtn = document.getElementById('toggleMilestonePanelBtn');
+    const toolsDrawer = document.getElementById('calToolsDrawer');
+    const toolsBtn = document.getElementById('toggleCalToolsBtn');
+
+    layoutEl?.classList.toggle('with-side', calSideOpen);
+    sideEl?.classList.toggle('hidden', !calSideOpen);
+    if (msBtn) {
+      msBtn.classList.toggle('active', calSideOpen);
+      msBtn.setAttribute('aria-expanded', String(calSideOpen));
+    }
+    toolsDrawer?.classList.toggle('hidden', !calToolsOpen);
+    if (toolsBtn) {
+      toolsBtn.classList.toggle('active', calToolsOpen);
+      toolsBtn.setAttribute('aria-expanded', String(calToolsOpen));
+      toolsBtn.textContent = calToolsOpen ? '도구 ▴' : '도구 ▾';
+    }
+  }
+
   function renderCalendarOverviewTab() {
     const year = fullCalCursor.getFullYear();
     const month = fullCalCursor.getMonth();
@@ -2959,6 +2996,8 @@
     const weekView = document.getElementById('weekMatrixView');
     const monthToolbar = document.getElementById('calMonthToolbar');
     const weekToolbar = document.getElementById('calWeekToolbar');
+
+    syncCalendarPanelsUI();
 
     // 상단 주별/월별 탭 버튼 동기화
     document.querySelectorAll('#calPrimaryViewTabs [data-calview]').forEach(btn => {
@@ -2988,7 +3027,7 @@
       const mStats = renderMonthlyGridInto(monthGrid, year, month, calMonthMode, false);
       const mSummaryEl = document.getElementById('calMonthSummaryBadges');
       if (mSummaryEl && mStats) {
-        mSummaryEl.textContent = `주요 일정 ${mStats.impCount}건 · 할 일 마감 ${mStats.todoCount}건 · 일반 일정 ${mStats.regCount}건`;
+        mSummaryEl.textContent = `주요 ${mStats.impCount}건 · 마감 ${mStats.todoCount}건 · 일반 ${mStats.regCount}건`;
       }
     } else {
       monthView.classList.add('hidden');
@@ -2999,24 +3038,27 @@
       const weekInfo = getWeekRangeFromDateStr(selectedDate);
       titleEl.textContent = `${weekInfo.titleLabel}`;
 
+      const boardScrollWrap = document.getElementById('weekBoardScrollWrap');
       const boardGrid = document.getElementById('weekMatrixGrid');
       const timetableWrap = document.getElementById('weekTimetableWrap');
 
       if (calWeekLayout === 'timetable') {
+        boardScrollWrap?.classList.add('hidden');
         boardGrid.classList.add('hidden');
         timetableWrap.classList.remove('hidden');
         const wStats = renderWeeklyTimetableInto(timetableWrap, weekInfo, calWeekMode);
         const wSummaryEl = document.getElementById('calWeekSummaryBadges');
         if (wSummaryEl && wStats) {
-          wSummaryEl.textContent = `주간 계획 ${formatDurationKo(wStats.totalPlanMins)} · 주간 진행 ${formatDurationKo(wStats.totalActualMins)} · 마감 ${wStats.totalTodos}건`;
+          wSummaryEl.textContent = `계획 ${formatDurationKo(wStats.totalPlanMins)} · 실행 ${formatDurationKo(wStats.totalActualMins)} · 마감 ${wStats.totalTodos}건`;
         }
       } else {
+        boardScrollWrap?.classList.remove('hidden');
         boardGrid.classList.remove('hidden');
         timetableWrap.classList.add('hidden');
         const wStats = renderWeeklyBoardInto(boardGrid, weekInfo, calWeekMode, false);
         const wSummaryEl = document.getElementById('calWeekSummaryBadges');
         if (wSummaryEl && wStats) {
-          wSummaryEl.textContent = `주간 계획 ${formatDurationKo(wStats.totalPlanMins)} · 주간 진행 ${formatDurationKo(wStats.totalActualMins)} · 마감 ${wStats.totalTodos}건`;
+          wSummaryEl.textContent = `계획 ${formatDurationKo(wStats.totalPlanMins)} · 실행 ${formatDurationKo(wStats.totalActualMins)} · 마감 ${wStats.totalTodos}건`;
         }
       }
     }
@@ -3308,25 +3350,31 @@
       });
       col.appendChild(head);
 
-      // 일일 시간 요약 배지 영역
+      // 일일 시간 요약 배지 영역 (한 줄 컴팩트 표시 · 빈 시간 소음 제거)
       const statBox = document.createElement('div');
       statBox.className = 'wk-day-stats';
       if (mode === 'both') {
-        statBox.innerHTML = `
-          <span class="wk-stat-chip plan">계획 ${formatDurationKo(planMins)}</span>
-          <span class="wk-stat-chip actual">진행 ${formatDurationKo(actualMins)}</span>
-        `;
+        const chips = [];
+        if (planMins > 0) chips.push(`<span class="wk-stat-chip plan">계획 ${formatShortDurationKo(planMins)}</span>`);
+        if (actualMins > 0) chips.push(`<span class="wk-stat-chip actual">실행 ${formatShortDurationKo(actualMins)}</span>`);
+        statBox.innerHTML = chips.length > 0 ? chips.join('') : `<span class="wk-stat-empty">${todos.length > 0 ? `마감 ${todos.length}건` : '비어 있음'}</span>`;
       } else if (mode === 'plan') {
-        statBox.innerHTML = `<span class="wk-stat-chip plan">계획 ${formatDurationKo(planMins)} · ${plans.length}건</span>`;
+        statBox.innerHTML =
+          planMins > 0 || plans.length > 0
+            ? `<span class="wk-stat-chip plan">계획 ${formatShortDurationKo(planMins)} · ${plans.length}건</span>`
+            : `<span class="wk-stat-empty">${todos.length > 0 ? `마감 ${todos.length}건` : '계획 없음'}</span>`;
       } else {
-        statBox.innerHTML = `<span class="wk-stat-chip actual">진행 ${formatDurationKo(actualMins)} · ${actuals.length}건</span>`;
+        statBox.innerHTML =
+          actualMins > 0 || actuals.length > 0
+            ? `<span class="wk-stat-chip actual">실행 ${formatShortDurationKo(actualMins)} · ${actuals.length}건</span>`
+            : `<span class="wk-stat-empty">실행 기록 없음</span>`;
       }
       col.appendChild(statBox);
 
       const listWrap = document.createElement('div');
       listWrap.className = 'wk-items-list';
 
-      // 마감 할 일 표시 (계획+진행 또는 계획만 모드일 때)
+      // 마감 할 일 표시 (계획+실행 또는 계획만 모드일 때)
       if (showPlan && todos.length > 0) {
         todos.forEach(todo => {
           const cat = getCategoryById(todo.categoryId);
@@ -3339,14 +3387,15 @@
           tCard.innerHTML = `
             <div class="wk-card-top">
               <label class="wk-check-wrap">
-                <input type="checkbox" ${isTodoDone ? 'checked' : ''} />
-                <span class="wk-type-tag deadline">${isRecurring ? '🔁 정기' : '마감'}</span>
+                <input type="checkbox" class="wk-inline-check" ${isTodoDone ? 'checked' : ''} />
+                <span class="wk-type-tag deadline">${isRecurring ? '반복 마감' : '마감'}</span>
               </label>
-              ${pTag ? `<span class="project-tag-pill">@${escapeHtml(pTag)}</span>` : `<span class="wk-cat-label" style="color:${cat.color}">${escapeHtml(cat.name)}</span>`}
+              ${todo.important ? '<span class="important-star">★</span>' : ''}
             </div>
-            <div class="wk-card-title">${todo.important ? '★ ' : ''}${escapeHtml(todo.title)}</div>
+            <div class="wk-card-title">${escapeHtml(todo.title)}</div>
+            ${pTag ? `<div class="wk-card-sub"><span class="project-tag-pill">@${escapeHtml(pTag)}</span></div>` : ''}
           `;
-          tCard.querySelector('input').addEventListener('click', e => {
+          tCard.querySelector('.wk-inline-check').addEventListener('click', e => {
             e.stopPropagation();
             setItemCompletedOnDate(todo, dStr, e.target.checked);
             saveState();
@@ -3354,7 +3403,7 @@
           });
           tCard.addEventListener('click', e => {
             e.stopPropagation();
-            if (e.target.tagName === 'INPUT' || isJustDraggedOrResized()) return;
+            if (e.target.tagName === 'INPUT' || e.target.closest('label') || isJustDraggedOrResized()) return;
             openItemModalForEdit('todo', todo);
           });
           makeItemDraggable(tCard, 'todo', todo, dStr);
@@ -3362,7 +3411,7 @@
         });
       }
 
-      // 시간순 통합 카드 목록 (계획 / 진행)
+      // 시간순 통합 카드 목록 (계획 / 실행)
       const combinedEntries = [];
       if (showPlan) {
         plans.forEach(p => combinedEntries.push({ kind: 'plan', time: p.startTime, item: p }));
@@ -3377,9 +3426,10 @@
       });
 
       if (combinedEntries.length === 0 && (!showPlan || todos.length === 0)) {
+        col.classList.add('is-empty-day');
         const empty = document.createElement('p');
-        empty.className = 'empty-guide wk-empty';
-        empty.textContent = mode === 'actual' ? '진행 기록 없음' : '등록된 일정 없음';
+        empty.className = 'wk-empty-hint';
+        empty.textContent = '+ 클릭하여 추가';
         listWrap.appendChild(empty);
       } else {
         combinedEntries.forEach(entry => {
@@ -3395,18 +3445,21 @@
             card.style.borderLeftColor = cat.color;
             card.innerHTML = `
               <div class="wk-card-top">
-                <span class="wk-type-tag plan">${isRecurring ? '🔁 정기' : '계획'}</span>
-                <span class="wk-time-range">${item.startTime}~${item.endTime}</span>
-                <button type="button" class="wk-mini-check-btn" title="완료 체크 및 실제 진행 시간 자동 반영">${isPlanDone ? '✓ 완료' : '완료'}</button>
+                <label class="wk-check-wrap" title="완료 체크 시 실행 시간에 자동 반영됩니다">
+                  <input type="checkbox" class="wk-inline-check" ${isPlanDone ? 'checked' : ''} />
+                  <span class="wk-time-range">${item.startTime}~${item.endTime}</span>
+                </label>
+                <span class="wk-card-flags">
+                  ${isRecurring ? '<span class="wk-mini-flag">반복</span>' : ''}
+                  ${item.important ? '<span class="important-star">★</span>' : ''}
+                </span>
               </div>
-              <div class="wk-card-title">
-                ${pTag ? `<span class="project-tag-pill" style="margin-right:3px;">@${escapeHtml(pTag)}</span>` : ''}
-                ${item.important ? '<span class="important-star">★</span> ' : ''}${escapeHtml(item.title)}
-              </div>
+              <div class="wk-card-title">${escapeHtml(item.title)}</div>
+              ${pTag ? `<div class="wk-card-sub"><span class="project-tag-pill">@${escapeHtml(pTag)}</span></div>` : ''}
             `;
-            card.querySelector('.wk-mini-check-btn').addEventListener('click', e => {
+            card.querySelector('.wk-inline-check').addEventListener('click', e => {
               e.stopPropagation();
-              const nextDone = !isItemCompletedOnDate(item, dStr);
+              const nextDone = Boolean(e.target.checked);
               setItemCompletedOnDate(item, dStr, nextDone);
               if (nextDone) {
                 const exists = state.actualLogs.some(
@@ -3429,7 +3482,7 @@
             });
             card.addEventListener('click', e => {
               e.stopPropagation();
-              if (e.target.closest('button') || isJustDraggedOrResized()) return;
+              if (e.target.tagName === 'INPUT' || e.target.closest('label') || isJustDraggedOrResized()) return;
               openItemModalForEdit('schedule', item);
             });
             makeItemDraggable(card, 'schedule', item, dStr);
@@ -3440,14 +3493,14 @@
             card.style.background = `${cat.color}14`;
             card.innerHTML = `
               <div class="wk-card-top">
-                <span class="wk-type-tag actual">진행</span>
-                <span class="wk-time-range">${item.startTime}~${item.endTime}</span>
+                <span class="wk-actual-left">
+                  <span class="wk-type-tag actual">실행</span>
+                  <span class="wk-time-range">${item.startTime}~${item.endTime}</span>
+                </span>
                 <span class="wk-dur-label" style="color:${cat.color}">${dur}분</span>
               </div>
-              <div class="wk-card-title">
-                ${pTag ? `<span class="project-tag-pill" style="margin-right:3px;">@${escapeHtml(pTag)}</span>` : ''}
-                ${escapeHtml(item.title)}
-              </div>
+              <div class="wk-card-title">${escapeHtml(item.title)}</div>
+              ${pTag ? `<div class="wk-card-sub"><span class="project-tag-pill">@${escapeHtml(pTag)}</span></div>` : ''}
             `;
             card.addEventListener('click', e => {
               e.stopPropagation();
@@ -3539,9 +3592,9 @@
       const hCell = document.createElement('div');
       hCell.className = `wk-tt-day-head ${dStr === todayStr ? 'is-today' : ''}`;
       let subStat = '';
-      if (mode === 'both') subStat = `계획 ${formatDurationKo(pMins)} · 진행 ${formatDurationKo(aMins)}`;
-      else if (mode === 'plan') subStat = `계획 ${formatDurationKo(pMins)}`;
-      else subStat = `진행 ${formatDurationKo(aMins)}`;
+      if (mode === 'both') subStat = `계획 ${formatShortDurationKo(pMins)} · 실행 ${formatShortDurationKo(aMins)}`;
+      else if (mode === 'plan') subStat = `계획 ${formatShortDurationKo(pMins)}`;
+      else subStat = `실행 ${formatShortDurationKo(aMins)}`;
 
       hCell.innerHTML = `
         <div class="wk-tt-day-label">${dayObj.monthDayLabel} ${dayObj.dayName}</div>
@@ -3716,6 +3769,14 @@
       if (cmp !== 0) return cmp;
       return Number(b.important) - Number(a.important);
     });
+
+    const countBadge = document.getElementById('milestoneCountBadge');
+    if (countBadge) {
+      const pendingKeyCount =
+        state.todos.filter(t => matchesSelectedProjectTag(t) && (Boolean(t.dueDate) || (t.repeat && t.repeat !== 'none')) && !isItemCompletedOnDate(t, getNextOccurrenceDateStr(t, selectedDate, true))).length +
+        state.schedules.filter(s => matchesSelectedProjectTag(s) && s.important && !isItemCompletedOnDate(s, getNextOccurrenceDateStr(s, selectedDate, false))).length;
+      countBadge.textContent = String(pendingKeyCount);
+    }
 
     if (combined.length === 0) {
       container.innerHTML = `<p class="empty-guide">표시할 주요 일정이나 마감 할 일이 없습니다.</p>`;
@@ -6553,6 +6614,19 @@
       fullCalCursor = new Date();
       miniCalCursor = new Date();
       renderAll();
+    });
+
+    document.getElementById('toggleMilestonePanelBtn')?.addEventListener('click', () => {
+      calSideOpen = !calSideOpen;
+      syncCalendarPanelsUI();
+    });
+    document.getElementById('closeMilestonePanelBtn')?.addEventListener('click', () => {
+      calSideOpen = false;
+      syncCalendarPanelsUI();
+    });
+    document.getElementById('toggleCalToolsBtn')?.addEventListener('click', () => {
+      calToolsOpen = !calToolsOpen;
+      syncCalendarPanelsUI();
     });
 
     document.getElementById('calAddScheduleBtn')?.addEventListener('click', () => openItemModalForCreate('schedule'));
