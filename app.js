@@ -864,6 +864,150 @@
     syncReportToggleCardsUI();
   }
 
+  let dayDetailDate = '';
+
+  // 모달 · 팝업 창 브라우저 뒤로가기(History API) 연동 스택
+  const overlayHistoryStack = [];
+  let pushedOverlayHistoryCount = 0;
+  let suppressPopStateCount = 0;
+  let overlayHistorySyncQueued = false;
+
+  function isMobileMilestoneModalViewport() {
+    return typeof window !== 'undefined' && window.innerWidth <= 980;
+  }
+
+  function syncOverlayStackZIndex() {
+    overlayHistoryStack.forEach((id, idx) => {
+      const baseZ = 200 + idx * 10;
+      if (id === 'calendarSidePanel') {
+        const backdrop = document.getElementById('calendarSideBackdrop');
+        const panel = document.getElementById('calendarSidePanel');
+        if (backdrop) backdrop.style.zIndex = String(baseZ);
+        if (panel) panel.style.zIndex = String(baseZ + 2);
+      } else {
+        const el = document.getElementById(id);
+        if (el) el.style.zIndex = String(baseZ);
+      }
+    });
+  }
+
+  function scheduleOverlayHistorySync() {
+    if (overlayHistorySyncQueued) return;
+    overlayHistorySyncQueued = true;
+    const runSync = () => {
+      overlayHistorySyncQueued = false;
+      const desiredDepth = overlayHistoryStack.length;
+      const topId = desiredDepth > 0 ? overlayHistoryStack[desiredDepth - 1] : null;
+      const delta = desiredDepth - pushedOverlayHistoryCount;
+
+      if (delta > 0) {
+        for (let i = pushedOverlayHistoryCount; i < desiredDepth; i++) {
+          const idAtLevel = overlayHistoryStack[i];
+          try {
+            history.pushState({ timeflowOverlay: idAtLevel, depth: i + 1 }, '', location.href);
+            pushedOverlayHistoryCount++;
+          } catch (_) {
+            break;
+          }
+        }
+      } else if (delta < 0) {
+        pushedOverlayHistoryCount = desiredDepth;
+        suppressPopStateCount++;
+        try {
+          history.go(delta);
+        } catch (_) {
+          suppressPopStateCount = Math.max(0, suppressPopStateCount - 1);
+        }
+      } else if (desiredDepth > 0 && topId) {
+        try {
+          history.replaceState({ timeflowOverlay: topId, depth: desiredDepth }, '', location.href);
+        } catch (_) {}
+      }
+    };
+
+    if (typeof queueMicrotask === 'function') {
+      queueMicrotask(runSync);
+    } else {
+      Promise.resolve().then(runSync);
+    }
+  }
+
+  function hideOverlayDomOnly(modalId) {
+    if (modalId === 'alarmModal') {
+      clearInterval(alarmRepeatIntervalId);
+    }
+    if (modalId === 'calendarSidePanel') {
+      calSideOpen = false;
+      const panel = document.getElementById('calendarSidePanel');
+      const backdrop = document.getElementById('calendarSideBackdrop');
+      if (panel) panel.style.zIndex = '';
+      if (backdrop) backdrop.style.zIndex = '';
+      syncCalendarPanelsUI();
+      return;
+    }
+    const el = document.getElementById(modalId);
+    if (el) {
+      el.classList.add('hidden');
+      el.style.zIndex = '';
+    }
+  }
+
+  function openModalWindow(modalId) {
+    if (modalId === 'calendarSidePanel') {
+      calSideOpen = true;
+      syncCalendarPanelsUI();
+      if (!isMobileMilestoneModalViewport()) {
+        return;
+      }
+    } else {
+      const el = document.getElementById(modalId);
+      if (!el) return;
+      el.classList.remove('hidden');
+    }
+
+    const existingIdx = overlayHistoryStack.indexOf(modalId);
+    if (existingIdx !== -1) {
+      overlayHistoryStack.splice(existingIdx, 1);
+    }
+    overlayHistoryStack.push(modalId);
+    syncOverlayStackZIndex();
+    scheduleOverlayHistorySync();
+  }
+
+  function closeModalWindow(modalId, options = {}) {
+    const fromPopState = Boolean(options && options.fromPopState);
+    hideOverlayDomOnly(modalId);
+
+    const idx = overlayHistoryStack.lastIndexOf(modalId);
+    if (idx !== -1) {
+      overlayHistoryStack.splice(idx, 1);
+      syncOverlayStackZIndex();
+      if (!fromPopState) {
+        scheduleOverlayHistorySync();
+      }
+    }
+  }
+
+  function closeTopModalWindow() {
+    if (overlayHistoryStack.length === 0) return false;
+    const topId = overlayHistoryStack[overlayHistoryStack.length - 1];
+    closeModalWindow(topId);
+    return true;
+  }
+
+  function handleOverlayPopState() {
+    if (suppressPopStateCount > 0) {
+      suppressPopStateCount--;
+      return;
+    }
+    if (overlayHistoryStack.length > 0) {
+      pushedOverlayHistoryCount = Math.max(0, pushedOverlayHistoryCount - 1);
+      const topId = overlayHistoryStack.pop();
+      hideOverlayDomOnly(topId);
+      syncOverlayStackZIndex();
+    }
+  }
+
   function getActiveRealProjectTag() {
     return selectedProjectTag && selectedProjectTag !== '__UNTAGGED__'
       ? cleanProjectTag(selectedProjectTag)
@@ -1794,6 +1938,9 @@
     renderProjectTagFilterBar();
     syncDurationResizeModeUI();
     renderActiveTabViews(forceAllTabs);
+    if (dayDetailDate && !document.getElementById('dayDetailModal')?.classList.contains('hidden')) {
+      renderDayDetailModalContent(dayDetailDate);
+    }
     updateTtsButtonUI();
     applyThemeUI();
     updateSyncHeaderUI();
@@ -3360,12 +3507,16 @@
   function syncCalendarPanelsUI() {
     const layoutEl = document.getElementById('calendarOverviewLayout');
     const sideEl = document.getElementById('calendarSidePanel');
+    const backdropEl = document.getElementById('calendarSideBackdrop');
     const msBtn = document.getElementById('toggleMilestonePanelBtn');
     const toolsDrawer = document.getElementById('calToolsDrawer');
     const toolsBtn = document.getElementById('toggleCalToolsBtn');
+    const isMobileModal = isMobileMilestoneModalViewport();
 
-    layoutEl?.classList.toggle('with-side', calSideOpen);
+    layoutEl?.classList.toggle('with-side', calSideOpen && !isMobileModal);
     sideEl?.classList.toggle('hidden', !calSideOpen);
+    backdropEl?.classList.toggle('hidden', !(calSideOpen && isMobileModal));
+
     if (msBtn) {
       msBtn.classList.toggle('active', calSideOpen);
       msBtn.setAttribute('aria-expanded', String(calSideOpen));
@@ -3376,9 +3527,6 @@
       toolsBtn.setAttribute('aria-expanded', String(calToolsOpen));
       toolsBtn.textContent = calToolsOpen ? '도구 ▴' : '도구 ▾';
     }
-    document.querySelectorAll('.cal-jump-day-btn').forEach(btn => {
-      btn.textContent = `${formatShortMonthDayKo(selectedDate)} 타임라인 ▸`;
-    });
   }
 
   function renderCalendarOverviewTab() {
@@ -3417,12 +3565,7 @@
 
       titleEl.textContent = `${year}년 ${month + 1}월`;
       const monthGrid = document.getElementById('monthCalendarGrid');
-      const mStats = renderMonthlyGridInto(monthGrid, year, month, calMonthMode, false);
-      const mSummaryEl = document.getElementById('calMonthSummaryBadges');
-      if (mSummaryEl && mStats) {
-        mSummaryEl.textContent = `주요 ${mStats.impCount}건 · 마감 ${mStats.todoCount}건 · 일반 ${mStats.regCount}건`;
-      }
-      renderMobileMonthDaySheet();
+      renderMonthlyGridInto(monthGrid, year, month, calMonthMode, false);
     } else {
       monthView.classList.add('hidden');
       weekView.classList.remove('hidden');
@@ -3776,7 +3919,7 @@
           if (cell.otherMonth) {
             syncCalCursorsToSelectedDate(true);
           }
-          renderAll();
+          openDayDetailModal(cell.dateStr);
         });
         grid.appendChild(div);
         return;
@@ -3842,11 +3985,13 @@
             saveState();
             renderAll();
           });
-          pill.addEventListener('click', e => {
-            e.stopPropagation();
-            if (e.target.classList.contains('mc-inline-check') || isJustDraggedOrResized()) return;
-            openItemModalForEdit('todo', todo);
-          });
+          if (isCompact) {
+            pill.addEventListener('click', e => {
+              e.stopPropagation();
+              if (e.target.classList.contains('mc-inline-check') || isJustDraggedOrResized()) return;
+              openItemModalForEdit('todo', todo);
+            });
+          }
           makeItemDraggable(pill, 'todo', todo, cell.dateStr);
           stack.appendChild(pill);
         });
@@ -3868,11 +4013,13 @@
             <span class="mc-tag-chip imp" style="background:${cat.color};color:#FFFFFF;">${isRecurring ? '↻' : '★'} ${plan.startTime}</span>
             <span class="mc-item-title mc-imp-title">${escapeHtml(plan.title)}</span>
           `;
-          pill.addEventListener('click', e => {
-            e.stopPropagation();
-            if (isJustDraggedOrResized()) return;
-            openItemModalForEdit('schedule', plan);
-          });
+          if (isCompact) {
+            pill.addEventListener('click', e => {
+              e.stopPropagation();
+              if (isJustDraggedOrResized()) return;
+              openItemModalForEdit('schedule', plan);
+            });
+          }
           makeItemDraggable(pill, 'schedule', plan, cell.dateStr);
           stack.appendChild(pill);
         });
@@ -3893,11 +4040,13 @@
             <span class="mc-reg-time" style="color:${cat.color}">${plan.startTime}</span>
             <span class="mc-item-title">${escapeHtml(plan.title)}</span>
           `;
-          pill.addEventListener('click', e => {
-            e.stopPropagation();
-            if (isJustDraggedOrResized()) return;
-            openItemModalForEdit('schedule', plan);
-          });
+          if (isCompact) {
+            pill.addEventListener('click', e => {
+              e.stopPropagation();
+              if (isJustDraggedOrResized()) return;
+              openItemModalForEdit('schedule', plan);
+            });
+          }
           makeItemDraggable(pill, 'schedule', plan, cell.dateStr);
           stack.appendChild(pill);
         });
@@ -3927,25 +4076,240 @@
 
       div.appendChild(stack);
 
-      div.addEventListener('click', () => {
+      div.addEventListener('click', e => {
+        if (e.target.classList.contains('mc-inline-check') || e.target.closest('.mc-quick-add-btn') || isJustDraggedOrResized()) {
+          return;
+        }
         selectedDate = cell.dateStr;
         if (isCompact) {
           dashScope = 'day';
+          renderAll();
+          return;
         }
-        renderAll();
-      });
-
-      div.addEventListener('dblclick', e => {
-        if (e.target.closest('button') || e.target.closest('.mc-item-pill')) return;
-        selectedDate = cell.dateStr;
-        syncCalCursorsToSelectedDate(false);
-        switchTab('dashboard');
+        openDayDetailModal(cell.dateStr);
       });
 
       grid.appendChild(div);
     });
 
     return { impCount, regCount, todoCount };
+  }
+
+  // 월간 캘린더 날짜 클릭 자세히 보기 모달 렌더러
+  function openDayDetailModal(dateStr) {
+    dayDetailDate = dateStr || selectedDate || getTodayStr();
+    selectedDate = dayDetailDate;
+    renderAll();
+    renderDayDetailModalContent(dayDetailDate);
+    openModalWindow('dayDetailModal');
+  }
+
+  function renderDayDetailModalContent(dateStr) {
+    const titleEl = document.getElementById('dayDetailTitle');
+    const relEl = document.getElementById('dayDetailRelBadge');
+    const summaryEl = document.getElementById('dayDetailSummaryStrip');
+    const bodyEl = document.getElementById('dayDetailBody');
+    if (!titleEl || !summaryEl || !bodyEl || !dateStr) return;
+
+    const todayStr = getTodayStr();
+    const isToday = dateStr === todayStr;
+    const [y] = dateStr.split('-').map(Number);
+    const [ty] = todayStr.split('-').map(Number);
+    titleEl.textContent = y !== ty ? `${y}년 ${formatDateHeadingKo(dateStr)}` : formatDateHeadingKo(dateStr);
+
+    if (relEl) {
+      relEl.textContent = getRelativeDateLabelKo(dateStr);
+      relEl.classList.toggle('is-other-day', !isToday);
+    }
+
+    const daySchedules = state.schedules
+      .filter(s => matchesSelectedProjectTag(s) && doesItemOccurOnDate(s, dateStr, false))
+      .sort((a, b) => timeToMinutes(a.startTime) - timeToMinutes(b.startTime));
+    const dayTodos = state.todos.filter(
+      t => matchesSelectedProjectTag(t) && doesItemOccurOnDate(t, dateStr, true)
+    );
+    const dayActuals = state.actualLogs
+      .filter(a => matchesSelectedProjectTag(a) && a.date === dateStr)
+      .sort((a, b) => timeToMinutes(a.startTime) - timeToMinutes(b.startTime));
+
+    const planMins = daySchedules.reduce((acc, s) => acc + durationMinutes(s.startTime, s.endTime), 0);
+    const actualMins = dayActuals.reduce((acc, a) => acc + durationMinutes(a.startTime, a.endTime), 0);
+    const doneTodoCount = dayTodos.filter(t => isItemCompletedOnDate(t, dateStr)).length;
+
+    summaryEl.innerHTML = `
+      <span class="dd-sum-chip plan">계획 ${daySchedules.length}건${planMins > 0 ? ` · ${formatShortDurationKo(planMins)}` : ''}</span>
+      <span class="dd-sum-chip todo">할 일 ${dayTodos.length}건${dayTodos.length > 0 ? ` · 완료 ${doneTodoCount}` : ''}</span>
+      <span class="dd-sum-chip actual">실행 ${formatShortDurationKo(actualMins)}</span>
+    `;
+
+    bodyEl.innerHTML = '';
+
+    if (daySchedules.length === 0 && dayTodos.length === 0 && dayActuals.length === 0) {
+      bodyEl.innerHTML = `
+        <div class="dd-empty-box">
+          <p class="empty-guide">이 날짜에 등록된 일정이나 할 일이 없습니다.</p>
+          <p class="dd-empty-sub">하단 버튼으로 일정, 할 일, 실행 기록을 바로 추가할 수 있습니다.</p>
+        </div>
+      `;
+      return;
+    }
+
+    // 1. 계획 일정 섹션
+    if (daySchedules.length > 0) {
+      const sec = document.createElement('div');
+      sec.className = 'dd-section';
+      sec.innerHTML = `<div class="dd-sec-head"><span class="dd-sec-title">계획 일정</span><span class="dd-sec-count">${daySchedules.length}건</span></div>`;
+      const list = document.createElement('div');
+      list.className = 'dd-item-list';
+
+      daySchedules.forEach(plan => {
+        const cat = getCategoryById(plan.categoryId);
+        const isDone = isItemCompletedOnDate(plan, dateStr);
+        const pTag = cleanProjectTag(plan.projectTag);
+        const repLabel = getRepeatLabelKo(plan.repeat, plan.date);
+        const row = document.createElement('div');
+        row.className = `dd-item-row ${isDone ? 'is-done' : ''}`;
+        row.style.borderLeftColor = cat.color;
+        row.innerHTML = `
+          <input type="checkbox" class="dd-check" ${isDone ? 'checked' : ''} title="완료 상태 전환" />
+          <div class="dd-info">
+            <div class="dd-meta-top">
+              <span class="dd-time-badge">${plan.startTime} ~ ${plan.endTime}</span>
+              <span class="dd-cat-badge" style="color:${cat.color};background:${cat.color}18">${escapeHtml(cat.name)}</span>
+              ${plan.important ? '<span class="dd-imp-flag">★ 주요</span>' : ''}
+              ${repLabel ? `<span class="dd-sub-flag">${escapeHtml(repLabel)}</span>` : ''}
+              ${pTag ? `<span class="dd-tag-flag">@${escapeHtml(pTag)}</span>` : ''}
+            </div>
+            <div class="dd-item-title">${escapeHtml(plan.title)}</div>
+          </div>
+          <div class="dd-actions">
+            ${isToday && !isDone ? '<button type="button" class="icon-play-btn dd-play-btn" title="지금 바로 타이머 시작">▶</button>' : ''}
+          </div>
+        `;
+
+        row.querySelector('.dd-check').addEventListener('click', e => {
+          e.stopPropagation();
+          toggleScheduleCompletedWithActualSync(plan, dateStr, Boolean(e.target.checked), true);
+          saveState();
+          renderAll();
+        });
+
+        row.querySelector('.dd-play-btn')?.addEventListener('click', e => {
+          e.stopPropagation();
+          startLiveTrackerWith(plan.title, plan.categoryId, pTag, { type: 'schedule', id: plan.id });
+        });
+
+        row.addEventListener('click', e => {
+          if (e.target.classList.contains('dd-check') || e.target.closest('.dd-play-btn')) return;
+          selectedDate = dateStr;
+          openItemModalForEdit('schedule', plan);
+        });
+
+        list.appendChild(row);
+      });
+
+      sec.appendChild(list);
+      bodyEl.appendChild(sec);
+    }
+
+    // 2. 할 일 · 마감 섹션
+    if (dayTodos.length > 0) {
+      const sec = document.createElement('div');
+      sec.className = 'dd-section';
+      sec.innerHTML = `<div class="dd-sec-head"><span class="dd-sec-title">할 일 · 마감</span><span class="dd-sec-count">${dayTodos.length}건</span></div>`;
+      const list = document.createElement('div');
+      list.className = 'dd-item-list';
+
+      dayTodos.forEach(todo => {
+        const cat = getCategoryById(todo.categoryId);
+        const isDone = isItemCompletedOnDate(todo, dateStr);
+        const pTag = cleanProjectTag(todo.projectTag);
+        const repLabel = getRepeatLabelKo(todo.repeat, todo.dueDate);
+        const isRecurring = todo.repeat && todo.repeat !== 'none';
+        const row = document.createElement('div');
+        row.className = `dd-item-row ${isDone ? 'is-done' : ''}`;
+        row.style.borderLeftColor = cat.color;
+        row.innerHTML = `
+          <input type="checkbox" class="dd-check" ${isDone ? 'checked' : ''} title="완료 상태 전환" />
+          <div class="dd-info">
+            <div class="dd-meta-top">
+              <span class="mc-tag-chip deadline">${isRecurring ? '정기 마감' : '할 일 마감'}</span>
+              <span class="dd-cat-badge" style="color:${cat.color};background:${cat.color}18">${escapeHtml(cat.name)}</span>
+              <span class="dd-sub-flag">예상 ${Number(todo.estimatedMinutes || 30)}분</span>
+              ${todo.important ? '<span class="dd-imp-flag">★ 주요</span>' : ''}
+              ${repLabel ? `<span class="dd-sub-flag">${escapeHtml(repLabel)}</span>` : ''}
+              ${pTag ? `<span class="dd-tag-flag">@${escapeHtml(pTag)}</span>` : ''}
+            </div>
+            <div class="dd-item-title">${escapeHtml(todo.title)}</div>
+          </div>
+          <div class="dd-actions">
+            ${isToday && !isDone ? '<button type="button" class="icon-play-btn dd-play-btn" title="지금 바로 타이머 시작">▶</button>' : ''}
+          </div>
+        `;
+
+        row.querySelector('.dd-check').addEventListener('click', e => {
+          e.stopPropagation();
+          pushUndoSnapshot('할 일 완료 상태 변경');
+          setItemCompletedOnDate(todo, dateStr, Boolean(e.target.checked));
+          saveState();
+          renderAll();
+        });
+
+        row.querySelector('.dd-play-btn')?.addEventListener('click', e => {
+          e.stopPropagation();
+          startLiveTrackerWith(todo.title, todo.categoryId, pTag, { type: 'todo', id: todo.id });
+        });
+
+        row.addEventListener('click', e => {
+          if (e.target.classList.contains('dd-check') || e.target.closest('.dd-play-btn')) return;
+          selectedDate = dateStr;
+          openItemModalForEdit('todo', todo);
+        });
+
+        list.appendChild(row);
+      });
+
+      sec.appendChild(list);
+      bodyEl.appendChild(sec);
+    }
+
+    // 3. 실행 기록 섹션
+    if (dayActuals.length > 0) {
+      const sec = document.createElement('div');
+      sec.className = 'dd-section';
+      sec.innerHTML = `<div class="dd-sec-head"><span class="dd-sec-title">실행 기록</span><span class="dd-sec-count">${dayActuals.length}건</span></div>`;
+      const list = document.createElement('div');
+      list.className = 'dd-item-list';
+
+      dayActuals.forEach(act => {
+        const cat = getCategoryById(act.categoryId);
+        const dur = durationMinutes(act.startTime, act.endTime);
+        const pTag = cleanProjectTag(act.projectTag);
+        const row = document.createElement('div');
+        row.className = 'dd-item-row is-actual';
+        row.style.borderLeftColor = cat.color;
+        row.innerHTML = `
+          <div class="dd-info">
+            <div class="dd-meta-top">
+              <span class="dd-time-badge actual">${act.startTime} ~ ${act.endTime} · ${formatDurationKo(dur)}</span>
+              <span class="dd-cat-badge" style="color:${cat.color};background:${cat.color}18">${escapeHtml(cat.name)}</span>
+              ${pTag ? `<span class="dd-tag-flag">@${escapeHtml(pTag)}</span>` : ''}
+            </div>
+            <div class="dd-item-title">${escapeHtml(act.title)}</div>
+          </div>
+        `;
+
+        row.addEventListener('click', () => {
+          selectedDate = dateStr;
+          openItemModalForEdit('actual', act);
+        });
+
+        list.appendChild(row);
+      });
+
+      sec.appendChild(list);
+      bodyEl.appendChild(sec);
+    }
   }
 
   // 주별 요일 보드 렌더러 (계획+진행 / 계획만 / 진행만 지원)
@@ -4523,14 +4887,6 @@
       if (cmp !== 0) return cmp;
       return Number(b.important) - Number(a.important);
     });
-
-    const countBadge = document.getElementById('milestoneCountBadge');
-    if (countBadge) {
-      const pendingKeyCount =
-        state.todos.filter(t => matchesSelectedProjectTag(t) && (Boolean(t.dueDate) || (t.repeat && t.repeat !== 'none')) && !isItemCompletedOnDate(t, getNextOccurrenceDateStr(t, selectedDate, true))).length +
-        state.schedules.filter(s => matchesSelectedProjectTag(s) && s.important && !isItemCompletedOnDate(s, getNextOccurrenceDateStr(s, selectedDate, false))).length;
-      countBadge.textContent = String(pendingKeyCount);
-    }
 
     if (combined.length === 0) {
       container.innerHTML = `<p class="empty-guide">표시할 주요 일정이나 마감 할 일이 없습니다.</p>`;
@@ -5238,7 +5594,7 @@
       if (descEl) descEl.textContent = '확인을 누르지 않으면 놓치지 않도록 3분 뒤 다시 알림이 울립니다.';
     }
 
-    modal.classList.remove('hidden');
+    openModalWindow('alarmModal');
 
     const announceAlarm = () => {
       playChimeSound('alarm');
@@ -5267,8 +5623,7 @@
   }
 
   function closeAlarmModal() {
-    document.getElementById('alarmModal').classList.add('hidden');
-    clearInterval(alarmRepeatIntervalId);
+    closeModalWindow('alarmModal');
   }
 
   // -------------------- Cloudflare Gemini AI 연동 및 오프라인 스마트 폴백 --------------------
@@ -5859,7 +6214,7 @@
     document.getElementById('itemModalImportant').checked = false;
     document.getElementById('itemModalDeleteBtn').classList.add('hidden');
     toggleItemModalTimeVisibility(type);
-    document.getElementById('itemModal').classList.remove('hidden');
+    openModalWindow('itemModal');
   }
 
   function openItemModalForEdit(type, item) {
@@ -5886,7 +6241,7 @@
     if (alarmLeadSel) alarmLeadSel.value = String(item.alarmLeadMinutes || 0);
     document.getElementById('itemModalDeleteBtn').classList.remove('hidden');
     toggleItemModalTimeVisibility(type);
-    document.getElementById('itemModal').classList.remove('hidden');
+    openModalWindow('itemModal');
   }
 
   function toggleItemModalTimeVisibility(type) {
@@ -6000,7 +6355,7 @@
         ];
     steps.forEach(st => appendRoutineStepEditorRow(st.title, st.minutes, st.tip));
 
-    document.getElementById('routineModal').classList.remove('hidden');
+    openModalWindow('routineModal');
   }
 
   function appendRoutineStepEditorRow(title = '', minutes = 5, tip = '') {
@@ -7056,7 +7411,7 @@
 
     saveState();
     renderAll();
-    document.getElementById('syncModal')?.classList.add('hidden');
+    closeModalWindow('syncModal');
     showToast(`초기 예시 항목 ${removed}건을 비웠습니다.`, { withUndo: true });
   }
 
@@ -7077,7 +7432,7 @@
 
     saveState();
     renderAll();
-    document.getElementById('syncModal')?.classList.add('hidden');
+    closeModalWindow('syncModal');
     showToast('모든 일정, 할 일, 진행 기록이 초기화되었습니다.', { withUndo: true });
   }
 
@@ -7099,7 +7454,7 @@
     const modal = document.getElementById('searchModal');
     const inp = document.getElementById('globalSearchInput');
     if (!modal) return;
-    modal.classList.remove('hidden');
+    openModalWindow('searchModal');
     renderGlobalSearchResults();
     setTimeout(() => inp?.focus(), 40);
   }
@@ -7231,7 +7586,7 @@
       `;
 
       card.querySelector('.sr-go-btn').addEventListener('click', () => {
-        document.getElementById('searchModal')?.classList.add('hidden');
+        closeModalWindow('searchModal');
         if (entry.kind === 'routine') {
           switchTab('routines');
           startRoutinePlayer(entry.rawItem.id);
@@ -7245,7 +7600,7 @@
       });
 
       card.querySelector('.sr-edit-btn').addEventListener('click', () => {
-        document.getElementById('searchModal')?.classList.add('hidden');
+        closeModalWindow('searchModal');
         if (entry.kind === 'routine') {
           openRoutineModalForEdit(entry.rawItem);
         } else {
@@ -7333,7 +7688,7 @@
 
     // 알람 즉시 테스트 버튼
     document.getElementById('testAlarmBtn').addEventListener('click', () => {
-      document.getElementById('syncModal')?.classList.add('hidden');
+      closeModalWindow('syncModal');
       unlockAudioOnUserGesture();
       requestNotificationPermissionFromGesture();
       triggerAlarmModal({
@@ -7610,7 +7965,7 @@
         });
       }
 
-      document.getElementById('itemModal').classList.add('hidden');
+      closeModalWindow('itemModal');
       saveState();
       renderAll();
       showToast(`'${title}' 항목이 저장되었습니다.`, { withUndo: true });
@@ -7623,7 +7978,7 @@
       state.schedules = state.schedules.filter(x => x.id !== id);
       state.actualLogs = state.actualLogs.filter(x => x.id !== id);
       state.todos = state.todos.filter(x => x.id !== id);
-      document.getElementById('itemModal').classList.add('hidden');
+      closeModalWindow('itemModal');
       saveState();
       renderAll();
       showToast('항목이 삭제되었습니다.', { withUndo: true });
@@ -7810,7 +8165,7 @@
         selectedPreviewRoutineId = newRtnId;
       }
 
-      document.getElementById('routineModal').classList.add('hidden');
+      closeModalWindow('routineModal');
       saveState();
       renderAll();
       showToast(`'${name}' 루틴이 저장되었습니다.`);
@@ -7824,7 +8179,7 @@
         stopRoutinePlayerEarly();
       }
       state.routines = state.routines.filter(r => r.id !== id);
-      document.getElementById('routineModal').classList.add('hidden');
+      closeModalWindow('routineModal');
       saveState();
       renderAll();
       showToast('루틴이 삭제되었습니다.', { withUndo: true });
@@ -7916,22 +8271,65 @@
     });
 
     document.getElementById('toggleMilestonePanelBtn')?.addEventListener('click', () => {
-      calSideOpen = !calSideOpen;
-      syncCalendarPanelsUI();
+      if (isMobileMilestoneModalViewport()) {
+        if (calSideOpen) {
+          closeModalWindow('calendarSidePanel');
+        } else {
+          renderUpcomingMilestones();
+          openModalWindow('calendarSidePanel');
+        }
+      } else {
+        calSideOpen = !calSideOpen;
+        syncCalendarPanelsUI();
+      }
     });
     document.getElementById('closeMilestonePanelBtn')?.addEventListener('click', () => {
-      calSideOpen = false;
-      syncCalendarPanelsUI();
+      if (overlayHistoryStack.includes('calendarSidePanel')) {
+        closeModalWindow('calendarSidePanel');
+      } else {
+        calSideOpen = false;
+        syncCalendarPanelsUI();
+      }
+    });
+    document.getElementById('calendarSideBackdrop')?.addEventListener('click', () => {
+      closeModalWindow('calendarSidePanel');
     });
     document.getElementById('toggleCalToolsBtn')?.addEventListener('click', () => {
       calToolsOpen = !calToolsOpen;
       syncCalendarPanelsUI();
     });
-    document.querySelectorAll('.cal-jump-day-btn').forEach(btn => {
-      btn.addEventListener('click', () => {
-        syncCalCursorsToSelectedDate(false);
-        switchTab('dashboard');
-      });
+
+    // 월간 날짜 자세히 보기 모달 내부 네비게이션 및 빠른 추가 버튼
+    document.getElementById('dayDetailPrevBtn')?.addEventListener('click', () => {
+      dayDetailDate = addDaysStr(dayDetailDate || selectedDate, -1);
+      selectedDate = dayDetailDate;
+      syncCalCursorsToSelectedDate(true);
+      renderAll();
+    });
+    document.getElementById('dayDetailNextBtn')?.addEventListener('click', () => {
+      dayDetailDate = addDaysStr(dayDetailDate || selectedDate, 1);
+      selectedDate = dayDetailDate;
+      syncCalCursorsToSelectedDate(true);
+      renderAll();
+    });
+    document.getElementById('dayDetailGoTimelineBtn')?.addEventListener('click', () => {
+      if (dayDetailDate) selectedDate = dayDetailDate;
+      syncCalCursorsToSelectedDate(false);
+      closeModalWindow('dayDetailModal');
+      switchTab('dashboard');
+      renderAll();
+    });
+    document.getElementById('dayDetailAddScheduleBtn')?.addEventListener('click', () => {
+      if (dayDetailDate) selectedDate = dayDetailDate;
+      openItemModalForCreate('schedule', '09:00', '10:00');
+    });
+    document.getElementById('dayDetailAddTodoBtn')?.addEventListener('click', () => {
+      if (dayDetailDate) selectedDate = dayDetailDate;
+      openItemModalForCreate('todo');
+    });
+    document.getElementById('dayDetailAddActualBtn')?.addEventListener('click', () => {
+      if (dayDetailDate) selectedDate = dayDetailDate;
+      openItemModalForCreate('actual', '09:00', '10:00');
     });
 
     document.getElementById('calAddScheduleBtn')?.addEventListener('click', () => openItemModalForCreate('schedule'));
@@ -8111,9 +8509,9 @@
 
     // 카테고리 편집 모달 (설정 모달에서 연결)
     document.getElementById('openCategoryModalBtn').addEventListener('click', () => {
-      document.getElementById('syncModal')?.classList.add('hidden');
+      closeModalWindow('syncModal');
       renderCategoryEditorModal();
-      document.getElementById('categoryModal').classList.remove('hidden');
+      openModalWindow('categoryModal');
     });
 
     document.getElementById('addCategoryForm').addEventListener('submit', e => {
@@ -8139,7 +8537,7 @@
       document.getElementById('cloudSyncCodeInput').value = state.settings.syncCode || '';
       const autoCheck = document.getElementById('autoSyncToggleCheck');
       if (autoCheck) autoCheck.checked = state.settings.autoSync !== false;
-      document.getElementById('syncModal').classList.remove('hidden');
+      openModalWindow('syncModal');
     });
     document.getElementById('cloudSaveBtn').addEventListener('click', () => syncToCloud('save'));
     document.getElementById('cloudLoadBtn').addEventListener('click', () => syncToCloud('load'));
@@ -8188,7 +8586,7 @@
           state = normalizeImportedState(imported);
           saveState();
           renderAll();
-          document.getElementById('syncModal').classList.add('hidden');
+          closeModalWindow('syncModal');
           showToast('백업 파일을 성공적으로 불러왔습니다!', { withUndo: true });
         } catch (_) {
           showToast('유효한 JSON 백업 파일이 아닙니다.');
@@ -8200,12 +8598,12 @@
     });
 
     // 공통 모달 닫기 버튼 + 배경 클릭 및 단축키 지원
-    const closableModalIds = ['itemModal', 'routineModal', 'categoryModal', 'syncModal', 'searchModal'];
+    const closableModalIds = ['itemModal', 'routineModal', 'categoryModal', 'syncModal', 'searchModal', 'dayDetailModal'];
 
     document.querySelectorAll('[data-close]').forEach(btn => {
       btn.addEventListener('click', () => {
         const targetId = btn.dataset.close;
-        document.getElementById(targetId)?.classList.add('hidden');
+        if (targetId) closeModalWindow(targetId);
       });
     });
 
@@ -8213,16 +8611,16 @@
       const backdropEl = document.getElementById(modalId);
       backdropEl?.addEventListener('click', e => {
         if (e.target === backdropEl) {
-          backdropEl.classList.add('hidden');
+          closeModalWindow(modalId);
         }
       });
     });
 
     document.addEventListener('keydown', e => {
       if (e.key === 'Escape') {
-        closableModalIds.forEach(modalId => {
-          document.getElementById(modalId)?.classList.add('hidden');
-        });
+        if (closeTopModalWindow()) {
+          e.preventDefault();
+        }
         return;
       }
 
@@ -8265,6 +8663,31 @@
 
   // -------------------- 초기화 실행 --------------------
   function init() {
+    try {
+      history.replaceState({ timeflowBase: true }, '', location.href);
+    } catch (_) {}
+    window.addEventListener('popstate', handleOverlayPopState);
+    window.addEventListener('resize', () => {
+      if (!calSideOpen) return;
+      const inMobileModal = isMobileMilestoneModalViewport();
+      const inStack = overlayHistoryStack.includes('calendarSidePanel');
+      if (inMobileModal && !inStack) {
+        openModalWindow('calendarSidePanel');
+      } else if (!inMobileModal && inStack) {
+        const idx = overlayHistoryStack.lastIndexOf('calendarSidePanel');
+        if (idx !== -1) overlayHistoryStack.splice(idx, 1);
+        const panel = document.getElementById('calendarSidePanel');
+        const backdrop = document.getElementById('calendarSideBackdrop');
+        if (panel) panel.style.zIndex = '';
+        if (backdrop) backdrop.style.zIndex = '';
+        syncOverlayStackZIndex();
+        scheduleOverlayHistorySync();
+        syncCalendarPanelsUI();
+      } else {
+        syncCalendarPanelsUI();
+      }
+    });
+
     applyThemeUI();
     refreshKoreanSpeechVoice();
     if ('speechSynthesis' in window && typeof window.speechSynthesis.addEventListener === 'function') {

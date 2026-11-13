@@ -223,9 +223,15 @@ button, input, select, textarea {
 }
 
 .nav-tab.active {
-  background: var(--bg-card);
-  color: var(--primary);
-  box-shadow: var(--shadow-sm);
+  background: linear-gradient(135deg, var(--primary) 0%, #6366F1 100%);
+  color: #FFFFFF;
+  font-weight: 800;
+  box-shadow: 0 3px 10px rgba(79, 70, 229, 0.3);
+}
+
+.nav-tab.active svg {
+  stroke: #FFFFFF;
+  stroke-width: 2.3;
 }
 
 .header-actions {
@@ -735,9 +741,10 @@ button:disabled {
   flex-shrink: 0;
 }
 .filter-pill.active {
-  background: var(--text-main);
+  background: var(--primary);
   color: #FFFFFF;
-  border-color: var(--text-main);
+  border-color: var(--primary);
+  box-shadow: 0 2px 6px rgba(79, 70, 229, 0.24);
 }
 
 .todo-list-scroll {
@@ -1668,9 +1675,10 @@ body.is-resize-mode .tb-resize-handle {
 }
 
 .mode-pill-btn.active {
-  background: #1E293B;
+  background: var(--primary);
   color: #FFFFFF;
-  border-color: #1E293B;
+  border-color: var(--primary);
+  box-shadow: 0 2px 6px rgba(79, 70, 229, 0.24);
 }
 
 .view-mode-summary {
@@ -1705,6 +1713,10 @@ body.is-resize-mode .tb-resize-handle {
   grid-template-columns: minmax(0, 1fr) 360px;
 }
 
+.calendar-side-backdrop {
+  display: none;
+}
+
 .calendar-main-card {
   min-width: 0;
   overflow: hidden;
@@ -1729,9 +1741,9 @@ body.is-resize-mode .tb-resize-handle {
 
 #toggleMilestonePanelBtn.active,
 #toggleCalToolsBtn.active {
-  background: var(--primary-soft);
+  background: var(--primary);
   border-color: var(--primary);
-  color: var(--primary);
+  color: #FFFFFF;
 }
 
 .inline-count-pill {
@@ -4034,6 +4046,255 @@ body.is-resize-mode .wk-tt-chip {
   flex-shrink: 0;
 }
 
+/* ==================== 월간 날짜 자세히 보기 모달 ==================== */
+.day-detail-modal-box {
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  padding: 20px 22px;
+}
+
+.day-detail-head {
+  flex-shrink: 0;
+  margin-bottom: 10px;
+}
+
+.day-detail-nav {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+
+.day-detail-title-group {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+  min-width: 0;
+}
+
+.day-detail-summary-strip {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: wrap;
+  flex-shrink: 0;
+  padding-bottom: 12px;
+  margin-bottom: 12px;
+  border-bottom: 1px solid var(--border-color);
+}
+
+.dd-sum-chip {
+  display: inline-flex;
+  align-items: center;
+  padding: 3px 10px;
+  border-radius: 999px;
+  font-size: 0.75rem;
+  font-weight: 800;
+  white-space: nowrap;
+}
+
+.dd-sum-chip.plan {
+  background: var(--primary-soft);
+  color: var(--primary);
+}
+
+.dd-sum-chip.todo {
+  background: #FFE4E6;
+  color: #BE123C;
+}
+
+.dd-sum-chip.actual {
+  background: var(--teal-soft);
+  color: var(--teal);
+}
+
+.day-detail-body {
+  flex: 1;
+  min-height: 0;
+  max-height: min(56dvh, 480px);
+  overflow-y: auto;
+  overflow-x: hidden;
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  padding-right: 2px;
+  -webkit-overflow-scrolling: touch;
+  overscroll-behavior: contain;
+}
+
+.dd-section {
+  display: flex;
+  flex-direction: column;
+  gap: 7px;
+  flex-shrink: 0;
+}
+
+.dd-sec-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.dd-sec-title {
+  font-size: 0.8rem;
+  font-weight: 800;
+  color: var(--text-sub);
+}
+
+.dd-sec-count {
+  font-size: 0.73rem;
+  font-weight: 800;
+  color: var(--primary);
+  background: var(--primary-soft);
+  padding: 1px 7px;
+  border-radius: 999px;
+}
+
+.dd-item-list {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.dd-item-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 9px 11px;
+  border-radius: 10px;
+  border: 1px solid var(--border-color);
+  border-left: 4px solid var(--primary);
+  background: var(--bg-card);
+  cursor: pointer;
+  transition: border-color 0.14s, background 0.14s, transform 0.12s;
+}
+
+.dd-item-row:hover {
+  border-color: var(--primary);
+  background: var(--bg-subtle);
+  transform: translateX(1px);
+}
+
+.dd-item-row.is-done {
+  opacity: 0.58;
+  background: var(--bg-subtle);
+}
+
+.dd-item-row.is-done .dd-item-title {
+  text-decoration: line-through;
+}
+
+.dd-item-row.is-actual {
+  background: rgba(13, 148, 136, 0.045);
+}
+
+.dd-check {
+  width: 17px;
+  height: 17px;
+  accent-color: var(--primary);
+  cursor: pointer;
+  flex-shrink: 0;
+}
+
+.dd-info {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+
+.dd-meta-top {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  flex-wrap: wrap;
+}
+
+.dd-time-badge {
+  font-size: 0.72rem;
+  font-weight: 800;
+  color: var(--primary);
+  font-variant-numeric: tabular-nums;
+}
+
+.dd-time-badge.actual {
+  color: var(--teal);
+}
+
+.dd-cat-badge {
+  font-size: 0.68rem;
+  font-weight: 800;
+  padding: 1px 6px;
+  border-radius: 5px;
+  white-space: nowrap;
+}
+
+.dd-imp-flag {
+  font-size: 0.68rem;
+  font-weight: 800;
+  color: #B45309;
+  background: #FEF3C7;
+  padding: 1px 6px;
+  border-radius: 5px;
+}
+
+.dd-sub-flag {
+  font-size: 0.68rem;
+  font-weight: 700;
+  color: var(--text-sub);
+  background: var(--bg-subtle);
+  padding: 1px 6px;
+  border-radius: 5px;
+}
+
+.dd-tag-flag {
+  font-size: 0.68rem;
+  font-weight: 800;
+  color: #4338CA;
+  background: #E0E7FF;
+  padding: 1px 6px;
+  border-radius: 5px;
+}
+
+.dd-item-title {
+  font-size: 0.88rem;
+  font-weight: 700;
+  color: var(--text-main);
+  line-height: 1.35;
+  word-break: keep-all;
+}
+
+.dd-actions {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-shrink: 0;
+}
+
+.dd-empty-box {
+  padding: 28px 14px;
+  text-align: center;
+  border: 1px dashed var(--border-strong);
+  border-radius: 12px;
+  background: var(--bg-subtle);
+}
+
+.dd-empty-sub {
+  margin-top: 6px;
+  font-size: 0.78rem;
+  color: var(--text-muted);
+  font-weight: 600;
+}
+
+.day-detail-foot {
+  flex-shrink: 0;
+  margin-top: 12px;
+}
+
 /* ==================== 모바일 하단 네비게이션 바 ==================== */
 .mobile-bottom-nav {
   display: none;
@@ -4082,6 +4343,31 @@ body.is-resize-mode .wk-tt-chip {
 
 [data-theme="dark"] .quick-input-inner {
   border-color: #3730A3;
+}
+
+[data-theme="dark"] .nav-tab.active {
+  background: linear-gradient(135deg, #4F46E5 0%, #6366F1 100%);
+  color: #FFFFFF;
+  box-shadow: 0 3px 12px rgba(99, 102, 241, 0.42);
+}
+
+[data-theme="dark"] .dd-sum-chip.todo {
+  background: rgba(239, 68, 68, 0.18);
+  color: #FCA5A5;
+}
+
+[data-theme="dark"] .dd-imp-flag {
+  background: rgba(245, 158, 11, 0.18);
+  color: #FCD34D;
+}
+
+[data-theme="dark"] .dd-tag-flag {
+  background: rgba(99, 102, 241, 0.25);
+  color: #C7D2FE;
+}
+
+[data-theme="dark"] .dd-item-row.is-actual {
+  background: rgba(20, 184, 166, 0.08);
 }
 
 [data-theme="dark"] .icon-pill-btn.active {
@@ -5291,6 +5577,49 @@ body.is-resize-mode .wk-tt-chip {
   .week-matrix-grid {
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
+
+  .calendar-side-backdrop:not(.hidden) {
+    display: block;
+    position: fixed;
+    inset: 0;
+    z-index: 200;
+    background: rgba(15, 23, 42, 0.55);
+    -webkit-backdrop-filter: blur(3px);
+    backdrop-filter: blur(3px);
+  }
+
+  #calendarSidePanel:not(.hidden) {
+    position: fixed;
+    z-index: 202;
+    left: 50%;
+    top: 50%;
+    transform: translate(-50%, -50%);
+    width: calc(100vw - 28px);
+    max-width: 480px;
+    max-height: min(82dvh, 640px);
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+    border-radius: 18px;
+    padding: 18px;
+    box-shadow: var(--shadow-lg);
+    margin: 0;
+  }
+
+  #calendarSidePanel .panel-head,
+  #calendarSidePanel .filter-tabs {
+    flex-shrink: 0;
+  }
+
+  #calendarSidePanel .milestone-list {
+    flex: 1;
+    min-height: 0;
+    max-height: none;
+    overflow-y: auto;
+    padding-right: 2px;
+    -webkit-overflow-scrolling: touch;
+    overscroll-behavior: contain;
+  }
 }
 
 @media (max-width: 920px) {
@@ -5366,6 +5695,7 @@ body.is-resize-mode .wk-tt-chip {
   .mobile-bottom-nav {
     display: grid;
     grid-template-columns: repeat(4, 1fr);
+    gap: 6px;
     position: fixed;
     left: 0;
     right: 0;
@@ -5373,7 +5703,7 @@ body.is-resize-mode .wk-tt-chip {
     z-index: 190;
     background: var(--bg-card);
     border-top: 1px solid var(--border-color);
-    padding: 6px 8px calc(6px + env(safe-area-inset-bottom, 0px));
+    padding: 6px 10px calc(6px + env(safe-area-inset-bottom, 0px));
     box-shadow: 0 -4px 16px rgba(15, 23, 42, 0.08);
   }
 
@@ -5387,6 +5717,14 @@ body.is-resize-mode .wk-tt-chip {
     font-size: 0.72rem;
     font-weight: 700;
     border-radius: 10px;
+  }
+
+  .day-detail-modal-box {
+    padding: 16px;
+  }
+
+  .day-detail-body {
+    max-height: min(60dvh, 460px);
   }
 
   .toast-container {

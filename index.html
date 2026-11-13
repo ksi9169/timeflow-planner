@@ -392,7 +392,6 @@
               <button type="button" id="calToggleProjectFilterBtn" class="btn-xs btn-ghost js-toggle-ptag-bar hidden" aria-expanded="false" title="프로젝트 태그별로 캘린더 일정을 필터링합니다">프로젝트</button>
               <button type="button" id="toggleMilestonePanelBtn" class="btn-xs btn-outline" aria-expanded="false" title="다가오는 주요 일정과 마감 목록을 여닫습니다">
                 <span>마감 목록</span>
-                <span id="milestoneCountBadge" class="inline-count-pill">0</span>
               </button>
               <button type="button" id="toggleCalToolsBtn" class="btn-xs btn-ghost" aria-expanded="false" title="마감 추가, 실행 기록 추가, 외부 캘린더 파일 메뉴를 여닫습니다">도구 ▾</button>
               <button type="button" id="calAddScheduleBtn" class="btn-xs btn-primary">+ 일정</button>
@@ -424,10 +423,6 @@
                 <button type="button" class="mode-pill-btn" data-monthmode="deadline">할 일 마감</button>
               </div>
             </div>
-            <div class="view-mode-right">
-              <span id="calMonthSummaryBadges" class="view-mode-summary">주요 일정 0건 · 마감 0건</span>
-              <button type="button" class="btn-link-subtle cal-jump-day-btn" title="선택한 날짜의 일별 타임라인으로 이동합니다">일별 타임라인 ▸</button>
-            </div>
           </div>
 
           <!-- 주간 서브 툴바 -->
@@ -447,7 +442,6 @@
             <div class="view-mode-right">
               <span id="calWeekSummaryBadges" class="view-mode-summary">계획 0분 · 실행 0분</span>
               <button type="button" id="calWeekResizeModeBtn" class="btn-xs btn-ghost js-toggle-resize-mode hidden" aria-pressed="false" title="켜면 시간표 블록 하단 바를 당겨 소요 시간을 조절할 수 있습니다">시간 늘리기</button>
-              <button type="button" class="btn-link-subtle cal-jump-day-btn" title="선택한 날짜의 일별 타임라인으로 이동합니다">일별 타임라인 ▸</button>
             </div>
           </div>
 
@@ -457,7 +451,6 @@
               <span>일</span><span>월</span><span>화</span><span>수</span><span>목</span><span>금</span><span>토</span>
             </div>
             <div id="monthCalendarGrid" class="month-cal-grid"></div>
-            <div id="mobileMonthDaySheet" class="mobile-month-day-sheet" aria-live="polite"></div>
           </div>
 
           <!-- 주간 뷰 -->
@@ -469,11 +462,12 @@
           </div>
         </div>
 
-        <!-- 토글형 우측 패널: 다가오는 주요 일정 및 마감 -->
-        <aside id="calendarSidePanel" class="panel-card calendar-side-card hidden">
+        <!-- 모바일 모달 배경 + 토글형 우측 패널: 다가오는 주요 일정 및 마감 -->
+        <div id="calendarSideBackdrop" class="calendar-side-backdrop hidden" aria-hidden="true"></div>
+        <aside id="calendarSidePanel" class="panel-card calendar-side-card hidden" role="dialog" aria-label="다가오는 일정 · 마감">
           <div class="panel-head compact-head">
             <h2 class="panel-title">다가오는 일정 · 마감</h2>
-            <button type="button" id="closeMilestonePanelBtn" class="btn-xs btn-ghost">닫기</button>
+            <button type="button" id="closeMilestonePanelBtn" class="modal-close-btn" aria-label="마감 목록 닫기">&times;</button>
           </div>
           <div class="filter-tabs" id="milestoneFilterTabs">
             <button type="button" class="filter-pill active" data-msfilter="all">전체</button>
@@ -1046,6 +1040,35 @@
         </div>
       </div>
       <div id="globalSearchResults" class="global-search-results"></div>
+    </div>
+  </div>
+
+  <!-- ==================== 모달 7: 날짜 자세히 보기 모달 ==================== -->
+  <div id="dayDetailModal" class="modal-backdrop hidden" role="dialog" aria-modal="true" aria-labelledby="dayDetailTitle">
+    <div class="modal-box modal-box-wide day-detail-modal-box">
+      <div class="modal-head day-detail-head">
+        <div class="day-detail-nav">
+          <button type="button" id="dayDetailPrevBtn" class="icon-btn" aria-label="이전 날짜">&lsaquo;</button>
+          <div class="day-detail-title-group">
+            <h3 id="dayDetailTitle">11월 13일 금요일</h3>
+            <span id="dayDetailRelBadge" class="date-rel-badge">오늘</span>
+          </div>
+          <button type="button" id="dayDetailNextBtn" class="icon-btn" aria-label="다음 날짜">&rsaquo;</button>
+        </div>
+        <button type="button" class="modal-close-btn" data-close="dayDetailModal" aria-label="창 닫기">&times;</button>
+      </div>
+      <div id="dayDetailSummaryStrip" class="day-detail-summary-strip"></div>
+      <div id="dayDetailBody" class="day-detail-body"></div>
+      <div class="modal-foot day-detail-foot">
+        <div class="modal-foot-left">
+          <button type="button" id="dayDetailGoTimelineBtn" class="btn-outline btn-xs">타임라인 보기</button>
+        </div>
+        <div class="modal-foot-right">
+          <button type="button" id="dayDetailAddTodoBtn" class="btn-outline btn-xs">+ 할 일</button>
+          <button type="button" id="dayDetailAddActualBtn" class="btn-teal btn-xs">+ 실행 기록</button>
+          <button type="button" id="dayDetailAddScheduleBtn" class="btn-primary btn-xs">+ 일정</button>
+        </div>
+      </div>
     </div>
   </div>
 
