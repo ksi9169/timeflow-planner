@@ -7,6 +7,7 @@
 
   const STORAGE_KEY = 'TIMEFLOW_APP_STATE_V1';
   const FIRED_ALARM_STORAGE_KEY = 'TIMEFLOW_FIRED_ALARMS_V1';
+  const REPORT_TOGGLE_STORAGE_KEY = 'TIMEFLOW_REPORT_TOGGLE_V1';
   const SUPABASE_URL = 'https://buwyexbkjtnubjjzjgxa.supabase.co';
   const SUPABASE_KEY = 'sb_publishable_9UEw3qlP8N6mss-ECjYrSA_lVs33DzY';
 
@@ -786,10 +787,82 @@
   let currentTodoFilter = 'today';
   let currentReportPeriod = 'thisMonth';
   let selectedProjectTag = '';
+  let projectTagBarOpen = false;
   let todoGroupByTag = true;
   let currentSearchTypeFilter = 'all';
   let currentActiveTab = 'dashboard';
   let selectedPreviewRoutineId = '';
+  let durationResizeEnabled = false;
+  let lastMobileCalViewport = typeof window !== 'undefined' && window.innerWidth <= 768;
+
+  function syncDurationResizeModeUI() {
+    document.body.classList.toggle('is-resize-mode', durationResizeEnabled);
+    document.querySelectorAll('.js-toggle-resize-mode').forEach(btn => {
+      btn.classList.toggle('active', durationResizeEnabled);
+      btn.setAttribute('aria-pressed', String(durationResizeEnabled));
+      btn.textContent = durationResizeEnabled ? '늘리기 완료' : '시간 늘리기';
+    });
+  }
+
+  function isMobileCalendarViewport() {
+    return typeof window !== 'undefined' && window.innerWidth <= 768;
+  }
+
+  function loadReportCardOpenMap() {
+    const defaults = {
+      catShare: true,
+      pattern: true,
+      aiCoaching: false,
+      reviewNote: false,
+      timeBudget: false,
+      monthlyGoal: false
+    };
+    try {
+      const raw = localStorage.getItem(REPORT_TOGGLE_STORAGE_KEY);
+      if (!raw) return defaults;
+      const parsed = JSON.parse(raw);
+      if (parsed && typeof parsed === 'object') {
+        Object.keys(defaults).forEach(k => {
+          if (typeof parsed[k] === 'boolean') defaults[k] = parsed[k];
+        });
+      }
+    } catch (_) {}
+    return defaults;
+  }
+
+  function saveReportCardOpenMap() {
+    try {
+      localStorage.setItem(REPORT_TOGGLE_STORAGE_KEY, JSON.stringify(reportCardOpenMap));
+    } catch (_) {}
+  }
+
+  let reportCardOpenMap = loadReportCardOpenMap();
+
+  function syncReportToggleCardsUI() {
+    const cards = document.querySelectorAll('.report-toggle-card[data-report-card]');
+    let openCount = 0;
+    cards.forEach(card => {
+      const key = card.dataset.reportCard;
+      const isOpen = Boolean(reportCardOpenMap[key]);
+      if (isOpen) openCount += 1;
+      card.classList.toggle('is-collapsed', !isOpen);
+      const head = card.querySelector('.report-toggle-head');
+      if (head) {
+        head.setAttribute('aria-expanded', String(isOpen));
+      }
+    });
+    const toggleAllBtn = document.getElementById('toggleAllReportCardsBtn');
+    if (toggleAllBtn && cards.length > 0) {
+      toggleAllBtn.textContent = openCount === cards.length ? '모두 접기' : '모두 펼치기';
+    }
+  }
+
+  function setReportCardOpen(cardKey, isOpen) {
+    if (!cardKey || !(cardKey in reportCardOpenMap)) return;
+    reportCardOpenMap[cardKey] = Boolean(isOpen);
+    saveReportCardOpenMap();
+    syncReportToggleCardsUI();
+  }
 
   function getActiveRealProjectTag() {
     return selectedProjectTag && selectedProjectTag !== '__UNTAGGED__'
@@ -1457,8 +1530,36 @@
     return itemTag === selectedProjectTag;
   }
 
-  function renderProjectTagFilterBar() {
+  function syncProjectTagBarVisibility(hasTagsHint = null) {
     const sectionEl = document.getElementById('projectTagFilterSection');
+    const toggleBtns = document.querySelectorAll('.js-toggle-ptag-bar');
+    const hasTags =
+      hasTagsHint !== null ? Boolean(hasTagsHint) : getAllProjectTags().length > 0;
+    const isEligibleTab = currentActiveTab === 'dashboard' || currentActiveTab === 'calendar';
+    const hasActiveFilter = Boolean(selectedProjectTag);
+    const shouldShowBar =
+      isEligibleTab && (hasTags || hasActiveFilter) && projectTagBarOpen;
+
+    if (sectionEl) {
+      sectionEl.classList.toggle('hidden', !shouldShowBar);
+    }
+
+    const btnText =
+      selectedProjectTag === '__UNTAGGED__'
+        ? '프로젝트 · 미지정'
+        : selectedProjectTag
+        ? `@${selectedProjectTag}`
+        : '프로젝트';
+
+    toggleBtns.forEach(btn => {
+      btn.classList.toggle('hidden', !hasTags && !hasActiveFilter);
+      btn.classList.toggle('active', projectTagBarOpen || hasActiveFilter);
+      btn.setAttribute('aria-expanded', String(shouldShowBar));
+      btn.textContent = btnText;
+    });
+  }
+
+  function renderProjectTagFilterBar() {
     const chipsContainer = document.getElementById('projectTagFilterChips');
     const summaryEl = document.getElementById('projectTagActiveSummary');
     const datalistEl = document.getElementById('projectTagDatalist');
@@ -1502,9 +1603,7 @@
       datalistEl.innerHTML = tags.map(t => `<option value="${escapeHtml(t)}"></option>`).join('');
     }
 
-    if (sectionEl) {
-      sectionEl.classList.toggle('hidden', tags.length === 0 && !selectedProjectTag);
-    }
+    syncProjectTagBarVisibility(tags.length > 0);
 
     if (!chipsContainer) return;
 
@@ -1537,6 +1636,9 @@
     chipsContainer.querySelectorAll('.ptag-chip').forEach(btn => {
       btn.addEventListener('click', () => {
         selectedProjectTag = btn.dataset.ptag || '';
+        if (selectedProjectTag) {
+          projectTagBarOpen = true;
+        }
         renderAll();
       });
     });
@@ -1690,6 +1792,7 @@
     renderTodaySummary();
     renderCategorySelects();
     renderProjectTagFilterBar();
+    syncDurationResizeModeUI();
     renderActiveTabViews(forceAllTabs);
     updateTtsButtonUI();
     applyThemeUI();
@@ -2040,14 +2143,17 @@
     handle.title = '위아래로 드래그하여 소요 시간을 15분 단위로 조절합니다';
 
     handle.addEventListener('click', e => {
+      if (!durationResizeEnabled) return;
       e.stopPropagation();
     });
     handle.addEventListener('dragstart', e => {
+      if (!durationResizeEnabled) return;
       e.preventDefault();
       e.stopPropagation();
     });
 
     handle.addEventListener('pointerdown', e => {
+      if (!durationResizeEnabled) return;
       e.stopPropagation();
       e.preventDefault();
       try {
@@ -3316,6 +3422,7 @@
       if (mSummaryEl && mStats) {
         mSummaryEl.textContent = `주요 ${mStats.impCount}건 · 마감 ${mStats.todoCount}건 · 일반 ${mStats.regCount}건`;
       }
+      renderMobileMonthDaySheet();
     } else {
       monthView.classList.add('hidden');
       weekView.classList.remove('hidden');
@@ -3328,6 +3435,9 @@
       const boardScrollWrap = document.getElementById('weekBoardScrollWrap');
       const boardGrid = document.getElementById('weekMatrixGrid');
       const timetableWrap = document.getElementById('weekTimetableWrap');
+      const weekResizeBtn = document.getElementById('calWeekResizeModeBtn');
+      const effectiveWeekLayout = isMobileCalendarViewport() ? 'board' : calWeekLayout;
+      weekResizeBtn?.classList.toggle('hidden', effectiveWeekLayout !== 'timetable');
 
       const formatWeekSummaryLine = wStats => {
         if (!wStats) return '';
@@ -3338,7 +3448,7 @@
         return `계획 ${formatDurationKo(wStats.totalPlanMins)} · 실행 ${formatDurationKo(wStats.totalActualMins)}${ratePart} · 마감 ${wStats.totalTodos}건`;
       };
 
-      if (calWeekLayout === 'timetable') {
+      if (effectiveWeekLayout === 'timetable') {
         boardScrollWrap?.classList.add('hidden');
         boardGrid.classList.add('hidden');
         timetableWrap.classList.remove('hidden');
@@ -3362,16 +3472,182 @@
     renderUpcomingMilestones();
   }
 
-  // 월별 달력 렌더러 (주요 일정 · 할 일 마감 중심 지원)
+  // 모바일 월간 달력 하단 — 선택한 날짜의 구글 캘린더 스타일 상세 일정·할 일 시트
+  function renderMobileMonthDaySheet() {
+    const sheetEl = document.getElementById('mobileMonthDaySheet');
+    if (!sheetEl) return;
+    if (!isMobileCalendarViewport()) {
+      sheetEl.innerHTML = '';
+      sheetEl.classList.add('hidden');
+      return;
+    }
+
+    sheetEl.classList.remove('hidden');
+    const todayStr = getTodayStr();
+    const isToday = selectedDate === todayStr;
+    const relLabel = getRelativeDateLabelKo(selectedDate) || '오늘';
+
+    const dayTodos =
+      calMonthMode === 'important'
+        ? []
+        : state.todos.filter(
+            t => matchesSelectedProjectTag(t) && doesItemOccurOnDate(t, selectedDate, true)
+          );
+
+    const allDayPlans =
+      calMonthMode === 'deadline'
+        ? []
+        : state.schedules
+            .filter(s => matchesSelectedProjectTag(s) && doesItemOccurOnDate(s, selectedDate, false))
+            .sort((a, b) => timeToMinutes(a.startTime) - timeToMinutes(b.startTime));
+
+    const dayPlans =
+      calMonthMode === 'important' ? allDayPlans.filter(s => s.important) : allDayPlans;
+
+    const dayActuals =
+      calMonthMode === 'important' || calMonthMode === 'deadline'
+        ? []
+        : state.actualLogs
+            .filter(a => matchesSelectedProjectTag(a) && a.date === selectedDate)
+            .sort((a, b) => timeToMinutes(a.startTime) - timeToMinutes(b.startTime));
+
+    const headEl = document.createElement('div');
+    headEl.className = 'mmds-head';
+    headEl.innerHTML = `
+      <div class="mmds-head-left">
+        <strong class="mmds-date-title">${escapeHtml(formatDateHeadingKo(selectedDate))}</strong>
+        <span class="date-rel-badge ${!isToday ? 'is-other-day' : ''}">${escapeHtml(relLabel)}</span>
+      </div>
+      <div class="mmds-head-actions">
+        <button type="button" class="btn-xs btn-outline mmds-add-btn">+ 추가</button>
+        <button type="button" class="btn-xs btn-ghost mmds-jump-btn">타임라인 ▸</button>
+      </div>
+    `;
+
+    headEl.querySelector('.mmds-add-btn').addEventListener('click', () => {
+      openItemModalForCreate(calMonthMode === 'deadline' ? 'todo' : 'schedule', '09:00', '10:00');
+    });
+    headEl.querySelector('.mmds-jump-btn').addEventListener('click', () => {
+      syncCalCursorsToSelectedDate(false);
+      switchTab('dashboard');
+    });
+
+    const listEl = document.createElement('div');
+    listEl.className = 'mmds-list';
+
+    dayTodos.forEach(todo => {
+      const cat = getCategoryById(todo.categoryId);
+      const isDone = isItemCompletedOnDate(todo, selectedDate);
+      const isRecurring = todo.repeat && todo.repeat !== 'none';
+      const row = document.createElement('div');
+      row.className = `mmds-item mmds-todo ${isDone ? 'is-done' : ''}`;
+      row.style.borderLeftColor = cat.color;
+      row.innerHTML = `
+        <input type="checkbox" class="mmds-check" ${isDone ? 'checked' : ''} aria-label="할 일 완료 체크" />
+        <div class="mmds-main">
+          <div class="mmds-meta">
+            <span class="mc-tag-chip deadline">${isRecurring ? '정기 마감' : '마감'}</span>
+            <span class="mmds-cat" style="color:${cat.color}">${escapeHtml(cat.name)}</span>
+          </div>
+          <div class="mmds-title">${escapeHtml(todo.title)}</div>
+        </div>
+        <button type="button" class="icon-play-btn mmds-play-btn" title="이 할 일 타이머 시작">▶</button>
+      `;
+      row.querySelector('.mmds-check').addEventListener('click', e => {
+        e.stopPropagation();
+        pushUndoSnapshot('할 일 완료 상태 변경');
+        setItemCompletedOnDate(todo, selectedDate, Boolean(e.target.checked));
+        saveState();
+        renderAll();
+      });
+      row.querySelector('.mmds-play-btn').addEventListener('click', e => {
+        e.stopPropagation();
+        startLiveTrackerWith(todo.title, todo.categoryId, todo.projectTag || '', {
+          type: 'todo',
+          id: todo.id
+        });
+      });
+      row.addEventListener('click', () => openItemModalForEdit('todo', todo));
+      listEl.appendChild(row);
+    });
+
+    dayPlans.forEach(plan => {
+      const cat = getCategoryById(plan.categoryId);
+      const isDone = isItemCompletedOnDate(plan, selectedDate);
+      const isRecurring = plan.repeat && plan.repeat !== 'none';
+      const row = document.createElement('div');
+      row.className = `mmds-item mmds-plan ${isDone ? 'is-done' : ''}`;
+      row.style.borderLeftColor = cat.color;
+      row.innerHTML = `
+        <input type="checkbox" class="mmds-check" ${isDone ? 'checked' : ''} aria-label="일정 완료 체크" />
+        <div class="mmds-main">
+          <div class="mmds-meta">
+            <span class="mmds-time" style="color:${cat.color}">${plan.startTime}~${plan.endTime}</span>
+            ${plan.important ? '<span class="important-star">★</span>' : ''}
+            ${isRecurring ? '<span class="wk-mini-flag">반복</span>' : ''}
+            <span class="mmds-cat">${escapeHtml(cat.name)}</span>
+          </div>
+          <div class="mmds-title">${escapeHtml(plan.title)}</div>
+        </div>
+        <button type="button" class="icon-play-btn mmds-play-btn" title="이 일정 타이머 시작">▶</button>
+      `;
+      row.querySelector('.mmds-check').addEventListener('click', e => {
+        e.stopPropagation();
+        toggleScheduleCompletedWithActualSync(plan, selectedDate, Boolean(e.target.checked), true);
+        saveState();
+        renderAll();
+      });
+      row.querySelector('.mmds-play-btn').addEventListener('click', e => {
+        e.stopPropagation();
+        startLiveTrackerWith(plan.title, plan.categoryId, plan.projectTag || '', {
+          type: 'schedule',
+          id: plan.id
+        });
+      });
+      row.addEventListener('click', () => openItemModalForEdit('schedule', plan));
+      listEl.appendChild(row);
+    });
+
+    dayActuals.forEach(act => {
+      const cat = getCategoryById(act.categoryId);
+      const dur = durationMinutes(act.startTime, act.endTime);
+      const row = document.createElement('div');
+      row.className = 'mmds-item mmds-actual';
+      row.style.borderLeftColor = cat.color;
+      row.innerHTML = `
+        <div class="mmds-main">
+          <div class="mmds-meta">
+            <span class="wk-type-tag actual">실행</span>
+            <span class="mmds-time">${act.startTime}~${act.endTime} · ${dur}분</span>
+            <span class="mmds-cat" style="color:${cat.color}">${escapeHtml(cat.name)}</span>
+          </div>
+          <div class="mmds-title">${escapeHtml(act.title)}</div>
+        </div>
+      `;
+      row.addEventListener('click', () => openItemModalForEdit('actual', act));
+      listEl.appendChild(row);
+    });
+
+    if (listEl.children.length === 0) {
+      listEl.innerHTML = `<div class="mmds-empty">선택한 날짜에 등록된 일정이나 할 일이 없습니다.</div>`;
+    }
+
+    sheetEl.innerHTML = '';
+    sheetEl.appendChild(headEl);
+    sheetEl.appendChild(listEl);
+  }
+
+  // 월별 달력 렌더러 (PC 와이드 카드 / 모바일 구글 캘린더 스타일 7열 미니 바 지원)
   function renderMonthlyGridInto(grid, year, month, mode = 'focus', isCompact = false) {
     if (!grid) return null;
     grid.innerHTML = '';
+    const isMobileMonth = !isCompact && isMobileCalendarViewport();
+    grid.classList.toggle('is-mobile-month-grid', isMobileMonth);
 
     const firstDay = new Date(year, month, 1).getDay();
     const daysInMonth = new Date(year, month + 1, 0).getDate();
     const prevMonthDays = new Date(year, month, 0).getDate();
     const todayStr = getTodayStr();
-    const ymPrefix = `${year}-${String(month + 1).padStart(2, '0')}`;
 
     let impCount = 0;
     let regCount = 0;
@@ -3395,6 +3671,7 @@
       const div = document.createElement('div');
       div.className = [
         'month-cell',
+        isMobileMonth ? 'is-mobile-cell' : '',
         cell.otherMonth ? 'other-month' : '',
         cell.dateStr === todayStr ? 'is-today' : '',
         cell.dateStr === selectedDate ? 'is-selected' : '',
@@ -3423,7 +3700,89 @@
         todoCount += dayTodos.length;
       }
 
-      // 상단 날짜 헤더
+      if (isMobileMonth) {
+        // 구글 캘린더 모바일 스타일: 중앙 숫자 원형 강조 + 초슬림 카테고리 컬러 바 최대 3줄
+        const head = document.createElement('div');
+        head.className = 'mc-date-head mc-mob-date-head';
+        head.innerHTML = `<span class="mc-day-num mc-mob-day-num">${cell.day}</span>`;
+        div.appendChild(head);
+
+        const stack = document.createElement('div');
+        stack.className = 'mc-items-stack mc-mob-stack';
+
+        const mobEntries = [];
+        if (mode !== 'important') {
+          dayTodos.forEach(todo => {
+            const cat = getCategoryById(todo.categoryId);
+            mobEntries.push({
+              title: todo.title,
+              color: cat.color || '#E11D48',
+              solid: true,
+              isTodo: true,
+              done: isItemCompletedOnDate(todo, cell.dateStr)
+            });
+          });
+        }
+        if (mode !== 'deadline') {
+          importantPlans.forEach(plan => {
+            const cat = getCategoryById(plan.categoryId);
+            mobEntries.push({
+              title: plan.title,
+              color: cat.color,
+              solid: true,
+              isTodo: false,
+              done: isItemCompletedOnDate(plan, cell.dateStr)
+            });
+          });
+          if (mode === 'focus' || mode === 'all') {
+            regularPlans.forEach(plan => {
+              const cat = getCategoryById(plan.categoryId);
+              mobEntries.push({
+                title: plan.title,
+                color: cat.color,
+                solid: false,
+                isTodo: false,
+                done: isItemCompletedOnDate(plan, cell.dateStr)
+              });
+            });
+          }
+        }
+
+        const mobMax = 3;
+        mobEntries.slice(0, mobMax).forEach(entry => {
+          const bar = document.createElement('div');
+          bar.className = `mc-mob-bar ${entry.solid ? 'is-solid' : 'is-soft'} ${entry.done ? 'is-done' : ''}`;
+          if (entry.solid) {
+            bar.style.backgroundColor = entry.color;
+            bar.style.color = '#FFFFFF';
+          } else {
+            bar.style.backgroundColor = `${entry.color}22`;
+            bar.style.borderLeftColor = entry.color;
+          }
+          bar.textContent = entry.title;
+          stack.appendChild(bar);
+        });
+
+        if (mobEntries.length > mobMax) {
+          const more = document.createElement('div');
+          more.className = 'mc-mob-more';
+          more.textContent = `+${mobEntries.length - mobMax}`;
+          stack.appendChild(more);
+        }
+
+        div.appendChild(stack);
+        div.addEventListener('click', () => {
+          selectedDate = cell.dateStr;
+          if (cell.otherMonth) {
+            syncCalCursorsToSelectedDate(true);
+          }
+          renderAll();
+        });
+        grid.appendChild(div);
+        return;
+      }
+
+      // 상단 날짜 헤더 (PC · 태블릿)
       const head = document.createElement('div');
       head.className = 'mc-date-head';
 
@@ -4313,9 +4672,8 @@
       };
     });
 
-    // 정기 반복 일정을 포함해 선택 기간 내 모든 발생 날짜의 계획 시간 합산
+    // 정기 반복 일정을 포함해 선택 기간 내 모든 발생 날짜의 계획 시간 합산 (리포트는 프로젝트 태그 필터와 무관하게 전체 기간 집계)
     state.schedules.forEach(p => {
-      if (!matchesSelectedProjectTag(p)) return;
       const bucket = byCategory[p.categoryId] || Object.values(byCategory)[0];
       if (!bucket) return;
       const dur = durationMinutes(p.startTime, p.endTime);
@@ -4334,9 +4692,7 @@
       }
     });
 
-    const filteredActuals = state.actualLogs.filter(
-      a => matchesSelectedProjectTag(a) && a.date && dateSet.has(a.date)
-    );
+    const filteredActuals = state.actualLogs.filter(a => a.date && dateSet.has(a.date));
 
     filteredActuals.forEach(a => {
       const bucket = byCategory[a.categoryId] || Object.values(byCategory)[0];
@@ -4402,6 +4758,10 @@
         }
       });
     }
+    reportCardOpenMap.reviewNote = true;
+    reportCardOpenMap.timeBudget = true;
+    reportCardOpenMap.monthlyGoal = true;
+    saveReportCardOpenMap();
     saveState();
     renderReportAndGoalsTab();
     showToast('AI 분석 결과가 회고 노트와 다음 달 시간 예산·목표에 반영되었습니다.', { withUndo: true });
@@ -4458,6 +4818,7 @@
   }
 
   function renderReportAndGoalsTab() {
+    syncReportToggleCardsUI();
     const stats = computeReportStatistics();
     const todayStr = getTodayStr();
     const [ty, tm] = todayStr.split('-').map(Number);
@@ -5364,6 +5725,11 @@
 
   // AI 심층 시간 분석 보고서 & 다음 달 목표 역산 설계
   async function handleGenerateAiReport(isReverseGoalDesign = false) {
+    if (!isReverseGoalDesign) {
+      setReportCardOpen('aiCoaching', true);
+    } else {
+      setReportCardOpen('timeBudget', true);
+    }
     const stats = computeReportStatistics();
     const wishInput = document.getElementById('nextMonthWishInput');
     const userGoalWish = wishInput ? wishInput.value.trim() : '';
@@ -6902,6 +7268,7 @@
     document.querySelectorAll('.tab-view').forEach(sec => {
       sec.classList.toggle('active', sec.id === `tab-${tabName}`);
     });
+    syncProjectTagBarVisibility();
     if (changed) {
       renderActiveTabViews(false);
     }
@@ -7104,7 +7471,17 @@
       });
     });
 
-    // 일정 / 실제 기록 / 할 일 모달 열기 버튼
+    // 일정 / 실제 기록 / 할 일 모달 열기 버튼 및 시간 늘리기 모드 토글
+    document.querySelectorAll('.js-toggle-resize-mode').forEach(btn => {
+      btn.addEventListener('click', () => {
+        durationResizeEnabled = !durationResizeEnabled;
+        syncDurationResizeModeUI();
+        if (durationResizeEnabled) {
+          showToast('시간 늘리기 모드가 켜졌습니다. 일정 하단 바를 당겨 시간을 조절하세요.');
+        }
+      });
+    });
+
     document.getElementById('openAddTodoModalBtn').addEventListener('click', () => openItemModalForCreate('todo'));
     document.getElementById('openAddScheduleBtn').addEventListener('click', () => openItemModalForCreate('schedule'));
     document.getElementById('openAddActualBtn').addEventListener('click', () => openItemModalForCreate('actual'));
@@ -7504,6 +7881,12 @@
     document.getElementById('calPrevBtn').addEventListener('click', () => {
       if (currentCalView === 'month') {
         fullCalCursor = new Date(fullCalCursor.getFullYear(), fullCalCursor.getMonth() - 1, 1);
+        const todayStr = getTodayStr();
+        const [ty, tm] = todayStr.split('-').map(Number);
+        selectedDate =
+          fullCalCursor.getFullYear() === ty && fullCalCursor.getMonth() === tm - 1
+            ? todayStr
+            : toDateStr(new Date(fullCalCursor.getFullYear(), fullCalCursor.getMonth(), 1));
       } else {
         selectedDate = addDaysStr(selectedDate, -7);
         syncCalCursorsToSelectedDate(true);
@@ -7513,6 +7896,12 @@
     document.getElementById('calNextBtn').addEventListener('click', () => {
       if (currentCalView === 'month') {
         fullCalCursor = new Date(fullCalCursor.getFullYear(), fullCalCursor.getMonth() + 1, 1);
+        const todayStr = getTodayStr();
+        const [ty, tm] = todayStr.split('-').map(Number);
+        selectedDate =
+          fullCalCursor.getFullYear() === ty && fullCalCursor.getMonth() === tm - 1
+            ? todayStr
+            : toDateStr(new Date(fullCalCursor.getFullYear(), fullCalCursor.getMonth(), 1));
       } else {
         selectedDate = addDaysStr(selectedDate, 7);
         syncCalCursorsToSelectedDate(true);
@@ -7583,6 +7972,63 @@
       reportCursor = new Date(reportCursor.getFullYear(), reportCursor.getMonth() + 1, 1);
       currentReportPeriod = 'customMonth';
       renderReportAndGoalsTab();
+    });
+
+    // 프로젝트 태그 필터 바 토글 (오늘 · 캘린더 탭 전용)
+    document.querySelectorAll('.js-toggle-ptag-bar').forEach(btn => {
+      btn.addEventListener('click', () => {
+        projectTagBarOpen = !projectTagBarOpen;
+        syncProjectTagBarVisibility();
+      });
+    });
+    document.getElementById('closeProjectTagBarBtn')?.addEventListener('click', () => {
+      projectTagBarOpen = false;
+      syncProjectTagBarVisibility();
+    });
+
+    // 리포트 6개 카드 개별 토글 & 전체 펼치기/접기
+    document.querySelectorAll('.report-toggle-card[data-report-card]').forEach(card => {
+      const key = card.dataset.reportCard;
+      const head = card.querySelector('.report-toggle-head');
+      if (!head || !key) return;
+      const toggleFn = () => {
+        reportCardOpenMap[key] = !reportCardOpenMap[key];
+        saveReportCardOpenMap();
+        syncReportToggleCardsUI();
+      };
+      head.addEventListener('click', e => {
+        if (e.target.closest('button, a, input, select, textarea')) return;
+        toggleFn();
+      });
+      head.addEventListener('keydown', e => {
+        if (e.target !== head) return;
+        if (e.key === 'Enter' || e.key === ' ') {
+          e.preventDefault();
+          toggleFn();
+        }
+      });
+    });
+
+    document.getElementById('toggleAllReportCardsBtn')?.addEventListener('click', () => {
+      const keys = Object.keys(reportCardOpenMap);
+      const allOpen = keys.every(k => Boolean(reportCardOpenMap[k]));
+      const nextVal = !allOpen;
+      keys.forEach(k => {
+        reportCardOpenMap[k] = nextVal;
+      });
+      saveReportCardOpenMap();
+      syncReportToggleCardsUI();
+    });
+
+    // 모바일/PC 해상도 전환 시 캘린더 반응형 레이아웃 동기화
+    window.addEventListener('resize', () => {
+      const nowMob = isMobileCalendarViewport();
+      if (nowMob !== lastMobileCalViewport) {
+        lastMobileCalViewport = nowMob;
+        if (currentActiveTab === 'calendar') {
+          renderCalendarOverviewTab();
+        }
+      }
     });
 
     document.getElementById('loadSampleReportDataBtn').addEventListener('click', populateRichSampleReportLogs);

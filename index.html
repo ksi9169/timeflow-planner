@@ -166,10 +166,13 @@
 
   <!-- 메인 콘텐츠 컨테이너 -->
   <main class="main-container">
-    <!-- 슬림 프로젝트 태그 필터 칩 바 -->
-    <section id="projectTagFilterSection" class="project-tag-bar" aria-label="프로젝트 태그 필터">
+    <!-- 슬림 프로젝트 태그 필터 칩 바 (오늘·캘린더 탭에서 토글 또는 활성 필터 시 표시) -->
+    <section id="projectTagFilterSection" class="project-tag-bar hidden" aria-label="프로젝트 태그 필터">
       <div id="projectTagFilterChips" class="ptag-chip-list"></div>
-      <span id="projectTagActiveSummary" class="ptag-active-summary hidden"></span>
+      <div class="ptag-bar-right">
+        <span id="projectTagActiveSummary" class="ptag-active-summary hidden"></span>
+        <button type="button" id="closeProjectTagBarBtn" class="btn-xs btn-ghost ptag-close-btn" title="프로젝트 필터 바를 접습니다">접기</button>
+      </div>
     </section>
 
     <!-- ==================== 탭 1: 오늘 (PC = 2열 플래너 안 A / 모바일 = 접이식 요약 + 단일 타임라인 안 B) ==================== -->
@@ -202,6 +205,7 @@
               <div class="panel-head compact-head">
                 <h2 class="panel-title">할 일</h2>
                 <div class="todo-head-actions">
+                  <button type="button" id="dashToggleProjectFilterBtn" class="btn-xs btn-ghost js-toggle-ptag-bar hidden" aria-expanded="false" title="프로젝트 태그별로 할 일과 일정을 필터링합니다">프로젝트</button>
                   <button type="button" id="toggleTodoGroupByTagBtn" class="btn-xs btn-ghost active" title="같은 프로젝트 태그끼리 묶어서 봅니다">태그 묶음</button>
                   <button type="button" id="openAddTodoModalBtn" class="btn-xs btn-outline">+ 추가</button>
                 </div>
@@ -264,6 +268,8 @@
             <div id="dashTrackModeBar" class="timeline-summary-strip">
               <span id="dashTrackSummaryText" class="view-mode-summary">계획 0분 · 실행 0분</span>
               <div class="timeline-summary-actions">
+                <button type="button" id="toggleDurationResizeBtn" class="btn-xs btn-ghost js-toggle-resize-mode" aria-pressed="false" title="켜면 일정 블록 하단 바를 당겨 소요 시간을 15분 단위로 조절할 수 있습니다">시간 늘리기</button>
+                <span class="subtle-dot" aria-hidden="true">·</span>
                 <button type="button" id="aiRescheduleBtn" class="btn-link-subtle ai-link-subtle" title="밀린 오늘 일정을 현재 시각 이후로 재배치합니다">AI 재배치</button>
                 <span class="subtle-dot" aria-hidden="true">·</span>
                 <button type="button" id="openAddActualBtn" class="btn-link-subtle">+ 실행 기록</button>
@@ -383,6 +389,7 @@
                 <button type="button" class="scope-seg-btn" data-calview="week">주간</button>
                 <button type="button" class="scope-seg-btn active" data-calview="month">월간</button>
               </div>
+              <button type="button" id="calToggleProjectFilterBtn" class="btn-xs btn-ghost js-toggle-ptag-bar hidden" aria-expanded="false" title="프로젝트 태그별로 캘린더 일정을 필터링합니다">프로젝트</button>
               <button type="button" id="toggleMilestonePanelBtn" class="btn-xs btn-outline" aria-expanded="false" title="다가오는 주요 일정과 마감 목록을 여닫습니다">
                 <span>마감 목록</span>
                 <span id="milestoneCountBadge" class="inline-count-pill">0</span>
@@ -439,6 +446,7 @@
             </div>
             <div class="view-mode-right">
               <span id="calWeekSummaryBadges" class="view-mode-summary">계획 0분 · 실행 0분</span>
+              <button type="button" id="calWeekResizeModeBtn" class="btn-xs btn-ghost js-toggle-resize-mode hidden" aria-pressed="false" title="켜면 시간표 블록 하단 바를 당겨 소요 시간을 조절할 수 있습니다">시간 늘리기</button>
               <button type="button" class="btn-link-subtle cal-jump-day-btn" title="선택한 날짜의 일별 타임라인으로 이동합니다">일별 타임라인 ▸</button>
             </div>
           </div>
@@ -449,6 +457,7 @@
               <span>일</span><span>월</span><span>화</span><span>수</span><span>목</span><span>금</span><span>토</span>
             </div>
             <div id="monthCalendarGrid" class="month-cal-grid"></div>
+            <div id="mobileMonthDaySheet" class="mobile-month-day-sheet" aria-live="polite"></div>
           </div>
 
           <!-- 주간 뷰 -->
@@ -494,144 +503,182 @@
             <button type="button" class="filter-pill" data-period="last7Days">최근 7일</button>
             <button type="button" class="filter-pill" data-period="today">오늘</button>
           </div>
-          <button type="button" id="loadSampleReportDataBtn" class="btn-xs btn-outline" title="현재 선택된 달에 분석 체험용 예시 기록을 채웁니다">예시 채우기</button>
+          <div class="report-toolbar-btns">
+            <button type="button" id="toggleAllReportCardsBtn" class="btn-xs btn-ghost" title="리포트의 모든 섹션을 한 번에 펼치거나 접습니다">모두 펼치기</button>
+            <button type="button" id="loadSampleReportDataBtn" class="btn-xs btn-outline" title="현재 선택된 달에 분석 체험용 예시 기록을 채웁니다">예시 채우기</button>
+          </div>
         </div>
       </div>
 
       <div class="report-two-col">
         <!-- 좌측: 시간 사용 분석 -->
         <div class="report-left-col">
-          <section class="panel-card">
-            <div class="panel-head compact-head">
-              <h3 class="panel-title">카테고리별 실행 시간</h3>
-              <strong id="reportTotalActualText" class="highlight-stat">총 0시간</strong>
+          <section class="panel-card report-toggle-card" data-report-card="catShare">
+            <div class="panel-head compact-head report-toggle-head" role="button" tabindex="0" aria-expanded="true">
+              <div class="rth-left">
+                <span class="rth-chevron" aria-hidden="true">▾</span>
+                <h3 class="panel-title">카테고리별 실행 시간</h3>
+              </div>
+              <div class="rth-right">
+                <strong id="reportTotalActualText" class="highlight-stat">총 0시간</strong>
+              </div>
             </div>
-            <div class="donut-and-legend">
-              <div id="reportDonutChart" class="donut-chart-box"></div>
-              <div id="reportCategoryBars" class="category-share-bars"></div>
+            <div class="report-card-body">
+              <div class="donut-and-legend">
+                <div id="reportDonutChart" class="donut-chart-box"></div>
+                <div id="reportCategoryBars" class="category-share-bars"></div>
+              </div>
             </div>
           </section>
 
-          <section class="panel-card">
-            <div class="panel-head compact-head">
-              <h3 class="panel-title">핵심 패턴 요약</h3>
-            </div>
-
-            <div class="pattern-insight-cards">
-              <div class="insight-mini-card">
-                <span class="insight-label">계획 실행률</span>
-                <strong id="insightMatchRate" class="insight-val">0%</strong>
-              </div>
-              <div class="insight-mini-card">
-                <span class="insight-label">집중 시간대</span>
-                <strong id="insightGoldenTime" class="insight-val">오전 09~12시</strong>
-              </div>
-              <div class="insight-mini-card">
-                <span class="insight-label">초과 주의 영역</span>
-                <strong id="insightTimeLeak" class="insight-val">분석 중</strong>
+          <section class="panel-card report-toggle-card" data-report-card="pattern">
+            <div class="panel-head compact-head report-toggle-head" role="button" tabindex="0" aria-expanded="true">
+              <div class="rth-left">
+                <span class="rth-chevron" aria-hidden="true">▾</span>
+                <h3 class="panel-title">핵심 패턴 요약</h3>
               </div>
             </div>
-
-            <details class="clean-details">
-              <summary>카테고리별 계획 대비 실행 비교표 보기</summary>
-              <div class="table-wrap">
-                <table class="report-compare-table">
-                  <thead>
-                    <tr>
-                      <th>카테고리</th>
-                      <th>계획 시간</th>
-                      <th>실행 시간</th>
-                      <th>차이</th>
-                      <th>실행률</th>
-                    </tr>
-                  </thead>
-                  <tbody id="reportCompareTableBody"></tbody>
-                </table>
+            <div class="report-card-body">
+              <div class="pattern-insight-cards">
+                <div class="insight-mini-card">
+                  <span class="insight-label">계획 실행률</span>
+                  <strong id="insightMatchRate" class="insight-val">0%</strong>
+                </div>
+                <div class="insight-mini-card">
+                  <span class="insight-label">집중 시간대</span>
+                  <strong id="insightGoldenTime" class="insight-val">오전 09~12시</strong>
+                </div>
+                <div class="insight-mini-card">
+                  <span class="insight-label">초과 주의 영역</span>
+                  <strong id="insightTimeLeak" class="insight-val">분석 중</strong>
+                </div>
               </div>
-            </details>
 
-            <details class="clean-details">
-              <summary>프로젝트 태그별 투입 시간 보기</summary>
-              <div class="table-wrap">
-                <table class="report-compare-table">
-                  <thead>
-                    <tr>
-                      <th>프로젝트 태그</th>
-                      <th>일정</th>
-                      <th>할 일 달성</th>
-                      <th>계획 시간</th>
-                      <th>실행 시간</th>
-                    </tr>
-                  </thead>
-                  <tbody id="reportProjectTagTableBody"></tbody>
-                </table>
-              </div>
-            </details>
+              <details class="clean-details">
+                <summary>카테고리별 계획 대비 실행 비교표 보기</summary>
+                <div class="table-wrap">
+                  <table class="report-compare-table">
+                    <thead>
+                      <tr>
+                        <th>카테고리</th>
+                        <th>계획 시간</th>
+                        <th>실행 시간</th>
+                        <th>차이</th>
+                        <th>실행률</th>
+                      </tr>
+                    </thead>
+                    <tbody id="reportCompareTableBody"></tbody>
+                  </table>
+                </div>
+              </details>
+
+              <details class="clean-details">
+                <summary>프로젝트 태그별 투입 시간 보기</summary>
+                <div class="table-wrap">
+                  <table class="report-compare-table">
+                    <thead>
+                      <tr>
+                        <th>프로젝트 태그</th>
+                        <th>일정</th>
+                        <th>할 일 달성</th>
+                        <th>계획 시간</th>
+                        <th>실행 시간</th>
+                      </tr>
+                    </thead>
+                    <tbody id="reportProjectTagTableBody"></tbody>
+                  </table>
+                </div>
+              </details>
+            </div>
           </section>
 
-          <section class="panel-card ai-report-card">
-            <div class="panel-head compact-head">
-              <div class="ai-report-head-left">
+          <section class="panel-card ai-report-card report-toggle-card is-collapsed" data-report-card="aiCoaching">
+            <div class="panel-head compact-head report-toggle-head" role="button" tabindex="0" aria-expanded="false">
+              <div class="rth-left ai-report-head-left">
+                <span class="rth-chevron" aria-hidden="true">▾</span>
                 <h3 class="panel-title">AI 코칭 리포트</h3>
                 <span id="aiReportPeriodBadge" class="date-rel-badge">2026년 11월</span>
               </div>
-              <button type="button" id="generateAiReportBtn" class="btn-xs btn-ai">리포트 생성</button>
+              <div class="rth-right">
+                <button type="button" id="generateAiReportBtn" class="btn-xs btn-ai">리포트 생성</button>
+              </div>
             </div>
-            <div id="aiReportResultBox" class="ai-report-result">
-              <p class="empty-guide">리포트 생성을 누르면 시간 사용 패턴을 분석해 회고 초안과 다음 달 예산을 제안합니다.</p>
+            <div class="report-card-body">
+              <div id="aiReportResultBox" class="ai-report-result">
+                <p class="empty-guide">리포트 생성을 누르면 시간 사용 패턴을 분석해 회고 초안과 다음 달 예산을 제안합니다.</p>
+              </div>
             </div>
           </section>
         </div>
 
         <!-- 우측: 회고 및 다음 달 목표 -->
         <div class="report-right-col">
-          <section class="panel-card">
-            <div class="panel-head compact-head">
-              <h3 class="panel-title">회고 노트</h3>
-              <button type="button" id="saveReviewNoteBtn" class="btn-xs btn-primary">저장</button>
+          <section class="panel-card report-toggle-card is-collapsed" data-report-card="reviewNote">
+            <div class="panel-head compact-head report-toggle-head" role="button" tabindex="0" aria-expanded="false">
+              <div class="rth-left">
+                <span class="rth-chevron" aria-hidden="true">▾</span>
+                <h3 class="panel-title">회고 노트</h3>
+              </div>
+              <div class="rth-right">
+                <button type="button" id="saveReviewNoteBtn" class="btn-xs btn-primary report-body-only-btn">저장</button>
+              </div>
             </div>
-            <div class="kpt-form-grid">
-              <div class="kpt-field">
-                <label for="reviewKeepInput" class="kpt-label keep">유지할 좋은 습관</label>
-                <textarea id="reviewKeepInput" rows="2" placeholder="잘 지켰던 루틴이나 집중 시간대를 적어보세요."></textarea>
-              </div>
-              <div class="kpt-field">
-                <label for="reviewProblemInput" class="kpt-label problem">아쉬웠던 점</label>
-                <textarea id="reviewProblemInput" rows="2" placeholder="시간이 초과되었거나 미뤄진 원인을 적어보세요."></textarea>
-              </div>
-              <div class="kpt-field">
-                <label for="reviewTryInput" class="kpt-label try">다음 달 시도할 행동</label>
-                <textarea id="reviewTryInput" rows="2" placeholder="새로 바꿀 시간 배분이나 루틴을 적어보세요."></textarea>
+            <div class="report-card-body">
+              <div class="kpt-form-grid">
+                <div class="kpt-field">
+                  <label for="reviewKeepInput" class="kpt-label keep">유지할 좋은 습관</label>
+                  <textarea id="reviewKeepInput" rows="2" placeholder="잘 지켰던 루틴이나 집중 시간대를 적어보세요."></textarea>
+                </div>
+                <div class="kpt-field">
+                  <label for="reviewProblemInput" class="kpt-label problem">아쉬웠던 점</label>
+                  <textarea id="reviewProblemInput" rows="2" placeholder="시간이 초과되었거나 미뤄진 원인을 적어보세요."></textarea>
+                </div>
+                <div class="kpt-field">
+                  <label for="reviewTryInput" class="kpt-label try">다음 달 시도할 행동</label>
+                  <textarea id="reviewTryInput" rows="2" placeholder="새로 바꿀 시간 배분이나 루틴을 적어보세요."></textarea>
+                </div>
               </div>
             </div>
           </section>
 
-          <section class="panel-card">
-            <div class="panel-head compact-head">
-              <h3 class="panel-title">다음 달 목표 시간 예산</h3>
-              <button type="button" id="saveTimeBudgetBtn" class="btn-xs btn-teal">예산 저장</button>
+          <section class="panel-card report-toggle-card is-collapsed" data-report-card="timeBudget">
+            <div class="panel-head compact-head report-toggle-head" role="button" tabindex="0" aria-expanded="false">
+              <div class="rth-left">
+                <span class="rth-chevron" aria-hidden="true">▾</span>
+                <h3 class="panel-title">다음 달 목표 시간 예산</h3>
+              </div>
+              <div class="rth-right">
+                <button type="button" id="saveTimeBudgetBtn" class="btn-xs btn-teal report-body-only-btn">예산 저장</button>
+              </div>
             </div>
-            <div class="ai-goal-wish-row">
-              <input
-                type="text"
-                id="nextMonthWishInput"
-                placeholder="예: 자격증 공부 35시간 확보하고 주 3회 운동하기"
-              />
-              <button type="button" id="aiDesignNextMonthBtn" class="btn-ai">AI 설계</button>
+            <div class="report-card-body">
+              <div class="ai-goal-wish-row">
+                <input
+                  type="text"
+                  id="nextMonthWishInput"
+                  placeholder="예: 자격증 공부 35시간 확보하고 주 3회 운동하기"
+                />
+                <button type="button" id="aiDesignNextMonthBtn" class="btn-ai">AI 설계</button>
+              </div>
+              <div id="timeBudgetEditorList" class="budget-editor-list"></div>
             </div>
-            <div id="timeBudgetEditorList" class="budget-editor-list"></div>
           </section>
 
-          <section class="panel-card">
-            <div class="panel-head compact-head">
-              <h3 class="panel-title">다음 달 핵심 목표</h3>
+          <section class="panel-card report-toggle-card is-collapsed" data-report-card="monthlyGoal">
+            <div class="panel-head compact-head report-toggle-head" role="button" tabindex="0" aria-expanded="false">
+              <div class="rth-left">
+                <span class="rth-chevron" aria-hidden="true">▾</span>
+                <h3 class="panel-title">다음 달 핵심 목표</h3>
+              </div>
             </div>
-            <form id="addMonthlyGoalForm" class="monthly-goal-form">
-              <input type="text" id="newMonthlyGoalInput" placeholder="핵심 목표 입력" />
-              <select id="newMonthlyGoalCategory" aria-label="목표 카테고리"></select>
-              <button type="submit" class="btn-primary">추가</button>
-            </form>
-            <div id="monthlyGoalList" class="monthly-goal-list"></div>
+            <div class="report-card-body">
+              <form id="addMonthlyGoalForm" class="monthly-goal-form">
+                <input type="text" id="newMonthlyGoalInput" placeholder="핵심 목표 입력" />
+                <select id="newMonthlyGoalCategory" aria-label="목표 카테고리"></select>
+                <button type="submit" class="btn-primary">추가</button>
+              </form>
+              <div id="monthlyGoalList" class="monthly-goal-list"></div>
+            </div>
           </section>
         </div>
       </div>
