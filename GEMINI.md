@@ -11,6 +11,13 @@
   - Database & Keep-Alive: LocalStorage 즉시 저장 + Supabase(`public.escape_rooms` 테이블 `TIMEFLOW:<동기화코드>` 실시간 클라우드 동기화) + 3일 주기 이중 잠김 방지(Cloudflare Cron `0 0 */3 * *` + [`.github/workflows/keep-alive.yml`](file:///g:/내%20드라이브/바이브%20코딩/일정관리/.github/workflows/keep-alive.yml))
 
 ## 2. 최근 완료된 작업 내역
+- **모바일 플로팅 빠른 입력(`#mobileQuickFabBtn`) · 모달 바텀 시트 스와이프 닫기 · 좌우 스와이프 탐색 · 실시간 현재 시각 기준선 & 빈 새벽·심야 시간대 접기 · 카드 스와이프 완료/내일 미루기 · 캘린더 헤더 1줄 슬림화 완료 (2026-11-13)**:
+  - **모바일 상단 공간 확보 및 우측 하단 `+` 플로팅 버튼(`#mobileQuickFabBtn`) 바텀 시트 전환**: 모바일(`<= 768px`)에서 상단 빠른 입력 바(`#quickInputSection`)를 기본 숨김 처리해 세로 뷰포트를 확보하고, 우측 하단 `+` 버튼 터치 시 `#mobileQuickBackdrop` 위의 바텀 시트로 열리며 등록·AI 등록 완료·뒤로가기·배경 터치·아래로 쓸어내리기로 즉시 닫히도록 구현(모달 열림 시 `body.has-open-overlay`로 FAB 자동 숨김)
+  - **모바일 전 모달 바텀 시트화 및 아래로 쓸어내려 닫기(`bindMobileSheetSwipeToClose`)**: 모바일(`<= 768px`)에서 긴급 알람(`#alarmModal`)을 제외한 모든 모달과 `#calendarSidePanel`을 상단 드래그 핸들 바가 있는 네이티브 바텀 시트(`border-radius: 22px 22px 0 0`)로 전환하고, 헤더나 스크롤 최상단에서 아래로 당겨 닫는 터치 제스처 지원
+  - **좌우 스와이프 날짜 · 주간 · 월간 탐색(`bindHorizontalSwipeNav`)**: `#dualTimelineScroll`(이전·다음 날), `#monthCalendarView`(이전·다음 달), `#weekBoardScrollWrap`(이전·다음 주), `#dayDetailModal .day-detail-modal-box`(자세히 보기 창 이전·다음 날)에 수평 스와이프 제스처와 슬라이드 전환 피드백 애니메이션 적용
+  - **오늘 타임라인 실시간 현재 시각 빨간 기준선(`.dt-now-line`) & 빈 새벽·심야 시간대 자동 접기**: 당일 타임라인의 현재 시각 행 내부에 분 단위 위치(`(minutes / 60) * 100%`)를 실시간 반영하는 빨간 기준선과 도트(`.dt-now-dot`)를 표시(`refreshLiveTimelineNowLine` 15초 주기 동기화)하고, 일정·기록이 없는 `06:00~08:00` 및 `22:00~24:00` 빈 시간대를 1줄 펼치기 배너(`.dt-fold-banner`)로 자동 접어 핵심 시간대 집중도 향상
+  - **할 일 · 마감 카드 밀어서 완료 · 내일로 미루기(`attachCardSwipeActions`, `deferItemToNextDay`)**: `.todo-item-card`, `#dayDetailModal` 항목, `#upcomingMilestoneList` 마감 카드에서 오른쪽 스와이프 시 완료 전환, 왼쪽 스와이프 시 마감·일정 날짜 `+1일` 연기(실행 취소 지원)가 동작하며, 미완료 일반 할 일 카드 우측에 원클릭 `내일▸` 버튼(`.todo-defer-btn`) 추가
+  - **소형 모바일(`<= 680px`) 캘린더 상단 헤더 정렬 슬림화**: `.calendar-top-head`의 날짜 이동 행과 우측 액션 버튼 리본(`.cal-head-right`)이 여러 줄로 흩어지지 않고 1줄 가로 리본으로 정돈되도록 최적화
 - **모달 뒤로가기 닫기(`popstate`) · 월간 날짜 클릭 자세히 보기 창(`#dayDetailModal`) · 모바일 `마감 목록` 모달 창 전환 · 캘린더 상단 배지/이동 버튼 제거 · 활성 탭 색상 강조 완료 (2026-11-13)**:
   - **창 열림 시 브라우저·모바일 뒤로가기(`Back`)로 창 닫기**: History API(`pushState` / `popstate`)와 마이크로태스크 배치 동기화 스택(`overlayHistoryStack`, `openModalWindow`, `closeModalWindow`, `handleOverlayPopState`)을 구축하여 모든 모달(`#alarmModal`, `#categoryModal`, `#itemModal`, `#routineModal`, `#syncModal`, `#searchModal`, `#dayDetailModal`)과 모바일 `마감 목록` 창이 열려 있을 때 뒤로가기를 누르면 앱 종료나 페이지 이탈 없이 최상단 창만 즉시 닫히도록 구현(다중 모달 중첩 `z-index` 자동 관리 포함)
   - **월간 캘린더 날짜 클릭 시 `날짜 자세히 보기` 모달(`#dayDetailModal`) 표시**: PC 및 모바일 월간 달력(`#monthCalendarGrid`)에서 날짜 셀 클릭 시 이전·다음 날 탐색, 계획·할 일·실행 요약 칩, 인라인 완료 체크박스, 당일 즉시 타이머 시작(`▶`), 항목 클릭 상세 편집, `타임라인 보기` 이동 및 하단 `+ 할 일` · `+ 실행 기록` · `+ 일정` 빠른 추가를 갖춘 팝업 창이 뜨도록 구현

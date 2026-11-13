@@ -122,8 +122,16 @@
     </div>
   </header>
 
-  <!-- 심플 1줄 빠른 입력 바 — 포커스 시에만 상세 옵션 열림 -->
+  <!-- 심플 1줄 빠른 입력 바 — PC 상단 고정 / 모바일 플로팅 버튼 바텀 시트 -->
+  <div id="mobileQuickBackdrop" class="mobile-quick-backdrop hidden" aria-hidden="true"></div>
   <section id="quickInputSection" class="quick-input-bar" aria-label="빠른 일정 및 할 일 입력">
+    <div class="mobile-quick-sheet-head">
+      <span class="sheet-drag-handle" aria-hidden="true"></span>
+      <div class="mobile-quick-head-row">
+        <strong class="mobile-quick-title">빠른 일정 · 할 일 등록</strong>
+        <button type="button" id="closeMobileQuickBtn" class="modal-close-btn" aria-label="빠른 입력 닫기">&times;</button>
+      </div>
+    </div>
     <form id="quickInputForm" class="quick-input-inner">
       <div class="quick-text-wrap">
         <svg class="quick-plus-icon" viewBox="0 0 24 24" width="17" height="17" fill="none" stroke="currentColor" stroke-width="2.2" aria-hidden="true"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
@@ -1071,6 +1079,17 @@
       </div>
     </div>
   </div>
+
+  <!-- 모바일 우측 하단 빠른 입력 플로팅 버튼 -->
+  <button
+    type="button"
+    id="mobileQuickFabBtn"
+    class="mobile-quick-fab"
+    title="빠른 일정 및 할 일 등록 열기"
+    aria-label="빠른 일정 및 할 일 등록 열기"
+  >
+    <svg viewBox="0 0 24 24" width="24" height="24" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" aria-hidden="true"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
+  </button>
 
   <!-- 모바일 하단 고정 네비게이션 바 -->
   <nav id="mobileBottomNav" class="mobile-bottom-nav" aria-label="모바일 화면 전환">

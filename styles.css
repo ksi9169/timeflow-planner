@@ -6187,3 +6187,415 @@ body.is-resize-mode .wk-tt-chip {
     flex: 1 1 160px;
   }
 }
+
+/* ==================== 2차 UI 최적화: 바텀 시트 · FAB · 스와이프 · 실시간 기준선 · 빈 시간대 접기 ==================== */
+.mobile-quick-backdrop,
+.mobile-quick-sheet-head,
+.mobile-quick-fab {
+  display: none;
+}
+
+.sheet-drag-handle {
+  display: block;
+  width: 38px;
+  height: 4px;
+  border-radius: 999px;
+  background: var(--border-strong);
+  margin: 0 auto 6px;
+  flex-shrink: 0;
+}
+
+/* 오늘 타임라인 실시간 빨간 기준선 & 빈 새벽·심야 자동 접기 배너 */
+.dt-hour-row {
+  position: relative;
+}
+
+.dt-now-line {
+  position: absolute;
+  left: 0;
+  right: 0;
+  height: 2px;
+  background: #EF4444;
+  z-index: 6;
+  pointer-events: none;
+  box-shadow: 0 0 6px rgba(239, 68, 68, 0.42);
+}
+
+.dt-now-dot {
+  position: absolute;
+  left: 62px;
+  top: 50%;
+  width: 9px;
+  height: 9px;
+  border-radius: 50%;
+  background: #EF4444;
+  border: 1.5px solid #FFFFFF;
+  transform: translate(-50%, -50%);
+  box-shadow: 0 1px 4px rgba(239, 68, 68, 0.55);
+}
+
+[data-theme="dark"] .dt-now-dot {
+  border-color: #0F172A;
+}
+
+.dt-fold-banner {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  padding: 7px 12px;
+  border: none;
+  border-bottom: 1px dashed var(--border-color);
+  background: var(--bg-subtle);
+  color: var(--text-sub);
+  font-size: 0.75rem;
+  font-weight: 700;
+  cursor: pointer;
+  white-space: nowrap;
+  transition: background 0.15s ease, color 0.15s ease;
+}
+
+.dt-fold-banner:last-child {
+  border-bottom: none;
+  border-top: 1px dashed var(--border-color);
+}
+
+.dt-fold-banner:hover {
+  background: var(--primary-soft);
+  color: var(--primary);
+}
+
+.dt-fold-icon {
+  font-size: 0.72rem;
+  line-height: 1;
+}
+
+[data-theme="dark"] .dt-fold-banner {
+  background: rgba(30, 41, 59, 0.65);
+  color: #94A3B8;
+}
+
+[data-theme="dark"] .dt-fold-banner:hover {
+  background: rgba(99, 102, 241, 0.18);
+  color: #C7D2FE;
+}
+
+/* 할 일 · 마감 카드 내일로 미루기 버튼 & 스와이프 시각 피드백 */
+.todo-defer-btn {
+  padding: 3px 7px;
+  font-size: 0.7rem;
+  font-weight: 700;
+  border-radius: 6px;
+  border: 1px solid var(--border-color);
+  background: var(--bg-subtle);
+  color: var(--text-sub);
+  cursor: pointer;
+  white-space: nowrap;
+  flex-shrink: 0;
+  transition: border-color 0.14s, color 0.14s, background 0.14s;
+}
+
+.todo-defer-btn:hover {
+  border-color: var(--primary);
+  background: var(--primary-soft);
+  color: var(--primary);
+}
+
+[data-theme="dark"] .todo-defer-btn {
+  background: rgba(30, 41, 59, 0.9);
+  border-color: #334155;
+  color: #CBD5E1;
+}
+
+[data-theme="dark"] .todo-defer-btn:hover {
+  border-color: #818CF8;
+  background: rgba(99, 102, 241, 0.22);
+  color: #E0E7FF;
+}
+
+.swipe-action-card {
+  position: relative;
+  touch-action: pan-y;
+  will-change: transform;
+}
+
+.swipe-action-card.is-swiping-right {
+  box-shadow: -4px 0 0 #10B981, 0 4px 12px rgba(16, 185, 129, 0.18);
+  border-color: #10B981 !important;
+}
+
+.swipe-action-card.is-swiping-left {
+  box-shadow: 4px 0 0 #6366F1, 0 4px 12px rgba(99, 102, 241, 0.18);
+  border-color: #6366F1 !important;
+}
+
+.swipe-action-card.is-swiping-right::after,
+.swipe-action-card.is-swiping-left::after {
+  position: absolute;
+  top: 50%;
+  transform: translateY(-50%);
+  padding: 3px 8px;
+  border-radius: 999px;
+  font-size: 0.68rem;
+  font-weight: 800;
+  color: #FFFFFF;
+  pointer-events: none;
+  white-space: nowrap;
+  z-index: 4;
+}
+
+.swipe-action-card.is-swiping-right::after {
+  content: attr(data-swipe-right-label);
+  left: 8px;
+  background: #10B981;
+}
+
+.swipe-action-card.is-swiping-left::after {
+  content: attr(data-swipe-left-label);
+  right: 8px;
+  background: #4F46E5;
+}
+
+/* 좌우 스와이프 날짜 · 월간 · 주간 전환 애니메이션 */
+@keyframes swipeNavPrevAnim {
+  0% {
+    opacity: 0.72;
+    transform: translateX(-12px);
+  }
+  100% {
+    opacity: 1;
+    transform: translateX(0);
+  }
+}
+
+@keyframes swipeNavNextAnim {
+  0% {
+    opacity: 0.72;
+    transform: translateX(12px);
+  }
+  100% {
+    opacity: 1;
+    transform: translateX(0);
+  }
+}
+
+.swipe-nav-prev {
+  animation: swipeNavPrevAnim 0.19s ease-out;
+}
+
+.swipe-nav-next {
+  animation: swipeNavNextAnim 0.19s ease-out;
+}
+
+@keyframes mobileSheetSlideUp {
+  0% {
+    opacity: 0.85;
+    transform: translateY(26px);
+  }
+  100% {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+/* 모바일(<= 768px): 상단 빠른 입력 바 숨김 + 우측 하단 FAB + 전 모달 바텀 시트 전환 */
+@media (max-width: 768px) {
+  .main-container {
+    margin-top: 8px;
+  }
+
+  #quickInputSection.quick-input-bar {
+    display: none;
+  }
+
+  .mobile-quick-backdrop:not(.hidden) {
+    display: block;
+    position: fixed;
+    inset: 0;
+    z-index: 200;
+    background: rgba(15, 23, 42, 0.55);
+    -webkit-backdrop-filter: blur(3px);
+    backdrop-filter: blur(3px);
+  }
+
+  #quickInputSection.quick-input-bar.is-mobile-open {
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+    position: fixed;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    z-index: 202;
+    margin: 0;
+    max-width: 100%;
+    padding: 10px 16px calc(18px + env(safe-area-inset-bottom, 0px));
+    background: var(--bg-card);
+    border-top: 1px solid var(--border-color);
+    border-radius: 22px 22px 0 0;
+    box-shadow: 0 -10px 32px rgba(15, 23, 42, 0.24);
+    animation: mobileSheetSlideUp 0.2s cubic-bezier(0.2, 0.85, 0.3, 1);
+  }
+
+  #quickInputSection.is-mobile-open .mobile-quick-sheet-head {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+  }
+
+  .mobile-quick-head-row {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 8px;
+  }
+
+  .mobile-quick-title {
+    font-size: 0.94rem;
+    font-weight: 800;
+    color: var(--text-main);
+  }
+
+  #quickInputSection.is-mobile-open .quick-input-inner {
+    flex-wrap: wrap;
+    padding: 8px 10px;
+    gap: 8px;
+  }
+
+  #quickInputSection.is-mobile-open .quick-text-wrap {
+    flex: 1 1 100%;
+  }
+
+  #quickInputSection.is-mobile-open .quick-btn-wrap {
+    width: 100%;
+    justify-content: flex-end;
+  }
+
+  #quickInputSection.is-mobile-open .quick-extra-drawer {
+    display: flex;
+    padding-top: 2px;
+  }
+
+  .mobile-quick-fab {
+    position: fixed;
+    right: 16px;
+    bottom: calc(74px + env(safe-area-inset-bottom, 0px));
+    z-index: 185;
+    width: 52px;
+    height: 52px;
+    border-radius: 50%;
+    border: none;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    color: #FFFFFF;
+    background: linear-gradient(135deg, #4F46E5 0%, #6366F1 100%);
+    box-shadow: 0 8px 22px rgba(79, 70, 229, 0.42);
+    cursor: pointer;
+    transition: transform 0.16s ease, opacity 0.16s ease, box-shadow 0.16s ease;
+  }
+
+  .mobile-quick-fab:active {
+    transform: scale(0.94);
+  }
+
+  [data-theme="dark"] .mobile-quick-fab {
+    background: linear-gradient(135deg, #6366F1 0%, #4F46E5 100%);
+    box-shadow: 0 8px 24px rgba(99, 102, 241, 0.5);
+  }
+
+  body.has-open-overlay .mobile-quick-fab {
+    opacity: 0;
+    pointer-events: none;
+    transform: scale(0.85);
+  }
+
+  /* 일반 모달 및 마감 목록 창을 바텀 시트로 전환 (#alarmModal은 긴급 알림이므로 중앙 유지) */
+  .modal-backdrop:not(#alarmModal) {
+    align-items: flex-end;
+    padding: calc(16px + env(safe-area-inset-top, 0px)) 0 0;
+  }
+
+  .modal-backdrop:not(#alarmModal) .modal-box {
+    max-width: 100%;
+    width: 100%;
+    border-radius: 22px 22px 0 0;
+    padding: 12px 18px calc(20px + env(safe-area-inset-bottom, 0px));
+    max-height: min(88dvh, calc(100dvh - 16px));
+    animation: mobileSheetSlideUp 0.2s cubic-bezier(0.2, 0.85, 0.3, 1);
+  }
+
+  .modal-backdrop:not(#alarmModal) .modal-box::before,
+  #calendarSidePanel:not(.hidden)::before {
+    content: "";
+    display: block;
+    width: 38px;
+    height: 4px;
+    border-radius: 999px;
+    background: var(--border-strong);
+    margin: 0 auto 10px;
+    flex-shrink: 0;
+  }
+
+  #calendarSidePanel:not(.hidden) {
+    left: 0;
+    right: 0;
+    bottom: 0;
+    top: auto;
+    transform: none;
+    width: 100%;
+    max-width: 100%;
+    max-height: min(86dvh, calc(100dvh - 18px));
+    border-radius: 22px 22px 0 0;
+    padding: 12px 16px calc(18px + env(safe-area-inset-bottom, 0px));
+    animation: mobileSheetSlideUp 0.2s cubic-bezier(0.2, 0.85, 0.3, 1);
+  }
+}
+
+/* 소형 모바일(<= 680px): 캘린더 상단 헤더 깔끔한 정렬 & 타임라인 기준선 점 위치 보정 */
+@media (max-width: 680px) {
+  .dt-now-dot {
+    left: 46px;
+  }
+
+  .calendar-top-head {
+    gap: 8px;
+    margin-bottom: 8px;
+  }
+
+  .calendar-top-head .date-nav-row {
+    width: 100%;
+    gap: 6px;
+  }
+
+  .calendar-top-head #calTodayBtn {
+    margin-left: auto;
+  }
+
+  .calendar-top-head .cal-head-right {
+    width: 100%;
+    flex-wrap: nowrap;
+    overflow-x: auto;
+    scrollbar-width: none;
+    gap: 5px;
+    padding-bottom: 2px;
+  }
+
+  .calendar-top-head .cal-head-right::-webkit-scrollbar {
+    display: none;
+  }
+
+  .calendar-top-head .cal-head-right > * {
+    flex-shrink: 0;
+  }
+
+  .calendar-top-head .cal-head-right .btn-xs {
+    padding: 5px 9px;
+    font-size: 0.74rem;
+  }
+
+  .calendar-top-head #calAddScheduleBtn {
+    margin-left: auto;
+  }
+}

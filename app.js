@@ -865,8 +865,11 @@
   }
 
   let dayDetailDate = '';
+  let mobileQuickInputOpen = false;
+  let timelineShowIdleHours = false;
+  let lastRenderedTimelineHour = -1;
 
-  // 모달 · 팝업 창 브라우저 뒤로가기(History API) 연동 스택
+  // 모달 · 팝업 창 브라우저 뒤로가기 연동 스택
   const overlayHistoryStack = [];
   let pushedOverlayHistoryCount = 0;
   let suppressPopStateCount = 0;
@@ -876,12 +879,43 @@
     return typeof window !== 'undefined' && window.innerWidth <= 980;
   }
 
+  function isMobileQuickFabViewport() {
+    return typeof window !== 'undefined' && window.innerWidth <= 768;
+  }
+
+  function syncMobileQuickInputUI() {
+    const sec = document.getElementById('quickInputSection');
+    const backdrop = document.getElementById('mobileQuickBackdrop');
+    const fab = document.getElementById('mobileQuickFabBtn');
+    const inMob = isMobileQuickFabViewport();
+    const shouldShowSheet = inMob && mobileQuickInputOpen;
+    if (sec) {
+      sec.classList.toggle('is-mobile-open', shouldShowSheet);
+      if (!shouldShowSheet) {
+        sec.style.transform = '';
+        sec.style.transition = '';
+      }
+    }
+    if (backdrop) {
+      backdrop.classList.toggle('hidden', !shouldShowSheet);
+    }
+    if (fab) {
+      fab.setAttribute('aria-expanded', String(shouldShowSheet));
+    }
+  }
+
   function syncOverlayStackZIndex() {
+    document.body.classList.toggle('has-open-overlay', overlayHistoryStack.length > 0);
     overlayHistoryStack.forEach((id, idx) => {
       const baseZ = 200 + idx * 10;
       if (id === 'calendarSidePanel') {
         const backdrop = document.getElementById('calendarSideBackdrop');
         const panel = document.getElementById('calendarSidePanel');
+        if (backdrop) backdrop.style.zIndex = String(baseZ);
+        if (panel) panel.style.zIndex = String(baseZ + 2);
+      } else if (id === 'quickInputSection') {
+        const backdrop = document.getElementById('mobileQuickBackdrop');
+        const panel = document.getElementById('quickInputSection');
         if (backdrop) backdrop.style.zIndex = String(baseZ);
         if (panel) panel.style.zIndex = String(baseZ + 2);
       } else {
@@ -940,28 +974,65 @@
       calSideOpen = false;
       const panel = document.getElementById('calendarSidePanel');
       const backdrop = document.getElementById('calendarSideBackdrop');
-      if (panel) panel.style.zIndex = '';
+      if (panel) {
+        panel.style.zIndex = '';
+        panel.style.transform = '';
+        panel.style.transition = '';
+      }
       if (backdrop) backdrop.style.zIndex = '';
       syncCalendarPanelsUI();
+      return;
+    }
+    if (modalId === 'quickInputSection') {
+      mobileQuickInputOpen = false;
+      const panel = document.getElementById('quickInputSection');
+      const backdrop = document.getElementById('mobileQuickBackdrop');
+      if (panel) {
+        panel.style.zIndex = '';
+        panel.style.transform = '';
+        panel.style.transition = '';
+      }
+      if (backdrop) backdrop.style.zIndex = '';
+      document.getElementById('quickInputText')?.blur();
+      syncMobileQuickInputUI();
       return;
     }
     const el = document.getElementById(modalId);
     if (el) {
       el.classList.add('hidden');
       el.style.zIndex = '';
+      const box = el.querySelector('.modal-box');
+      if (box) {
+        box.style.transform = '';
+        box.style.transition = '';
+      }
     }
   }
 
   function openModalWindow(modalId) {
     if (modalId === 'calendarSidePanel') {
       calSideOpen = true;
+      const panel = document.getElementById('calendarSidePanel');
+      if (panel) {
+        panel.style.transform = '';
+        panel.style.transition = '';
+      }
       syncCalendarPanelsUI();
       if (!isMobileMilestoneModalViewport()) {
         return;
       }
+    } else if (modalId === 'quickInputSection') {
+      if (!isMobileQuickFabViewport()) return;
+      mobileQuickInputOpen = true;
+      syncMobileQuickInputUI();
     } else {
       const el = document.getElementById(modalId);
       if (!el) return;
+      const box = el.querySelector('.modal-box');
+      if (box) {
+        box.style.transform = '';
+        box.style.transition = '';
+      }
       el.classList.remove('hidden');
     }
 
@@ -985,6 +1056,8 @@
       if (!fromPopState) {
         scheduleOverlayHistorySync();
       }
+    } else {
+      syncOverlayStackZIndex();
     }
   }
 
@@ -2357,17 +2430,124 @@
     blockEl.appendChild(handle);
   }
 
+  // -------------------- 할 일 · 마감 카드 스와이프 완료 · 내일 미루기 --------------------
+  function deferItemToNextDay(kind, item, baseDateStr) {
+    if (!item) return;
+    if (item.repeat && item.repeat !== 'none') {
+      showToast('정기 반복 항목은 반복 주기에 따라 자동으로 표시됩니다.');
+      return;
+    }
+    if (kind === 'schedule') {
+      const originDate = baseDateStr || item.date || selectedDate || getTodayStr();
+      const nextDate = addDaysStr(originDate, 1);
+      pushUndoSnapshot('일정 내일로 미루기');
+      item.date = nextDate;
+      saveState();
+      renderAll();
+      showToast(`'${item.title}' 일정을 ${formatShortMonthDayKo(nextDate)}로 미뤘습니다.`, { withUndo: true });
+      return;
+    }
+    const originDate = baseDateStr || item.dueDate || selectedDate || getTodayStr();
+    const nextDate = addDaysStr(originDate, 1);
+    pushUndoSnapshot('할 일 내일로 미루기');
+    item.dueDate = nextDate;
+    saveState();
+    renderAll();
+    showToast(`'${item.title}' 할 일을 ${formatShortMonthDayKo(nextDate)}로 미뤘습니다.`, { withUndo: true });
+  }
+
+  function attachCardSwipeActions(cardEl, { isDone = false, canDefer = true, onToggleDone, onDefer } = {}) {
+    if (!cardEl) return;
+    cardEl.dataset.swipeRightLabel = isDone ? '완료 해제' : '완료 체크';
+    if (canDefer) {
+      cardEl.dataset.swipeLeftLabel = '내일로 미루기';
+    }
+
+    let startX = 0;
+    let startY = 0;
+    let deltaX = 0;
+    let swiping = false;
+    let axisLocked = null;
+
+    cardEl.addEventListener(
+      'touchstart',
+      e => {
+        if (e.touches.length !== 1) return;
+        if (e.target.closest('button, input, select, textarea')) return;
+        startX = e.touches[0].clientX;
+        startY = e.touches[0].clientY;
+        deltaX = 0;
+        swiping = false;
+        axisLocked = null;
+      },
+      { passive: true }
+    );
+
+    cardEl.addEventListener(
+      'touchmove',
+      e => {
+        if (e.touches.length !== 1) return;
+        const dx = e.touches[0].clientX - startX;
+        const dy = e.touches[0].clientY - startY;
+
+        if (!axisLocked) {
+          if (Math.abs(dx) < 10 && Math.abs(dy) < 10) return;
+          axisLocked = Math.abs(dx) > Math.abs(dy) * 1.35 ? 'x' : 'y';
+        }
+        if (axisLocked !== 'x') return;
+
+        if (dx < 0 && !canDefer) {
+          deltaX = Math.max(-18, dx * 0.25);
+        } else if (dx > 0 && typeof onToggleDone !== 'function') {
+          deltaX = Math.min(18, dx * 0.25);
+        } else {
+          deltaX = Math.max(-96, Math.min(96, dx * 0.78));
+        }
+
+        swiping = true;
+        cardEl.style.transition = 'none';
+        cardEl.style.transform = `translateX(${deltaX.toFixed(1)}px)`;
+        cardEl.classList.toggle('is-swiping-right', deltaX > 22 && typeof onToggleDone === 'function');
+        cardEl.classList.toggle('is-swiping-left', deltaX < -22 && canDefer && typeof onDefer === 'function');
+      },
+      { passive: true }
+    );
+
+    const finishSwipe = () => {
+      if (!swiping) return;
+      const finalDx = deltaX;
+      swiping = false;
+      deltaX = 0;
+      axisLocked = null;
+      cardEl.classList.remove('is-swiping-right', 'is-swiping-left');
+      cardEl.style.transition = 'transform 0.18s ease-out';
+      cardEl.style.transform = '';
+      lastDragOrResizeAt = Date.now();
+
+      if (finalDx >= 54 && typeof onToggleDone === 'function') {
+        onToggleDone();
+      } else if (finalDx <= -54 && canDefer && typeof onDefer === 'function') {
+        onDefer();
+      }
+    };
+
+    cardEl.addEventListener('touchend', finishSwipe, { passive: true });
+    cardEl.addEventListener('touchcancel', finishSwipe, { passive: true });
+  }
+
   // -------------------- 할 일 및 프로젝트 태그 묶음 렌더링 --------------------
   function createTodoCardElement(todo) {
     const cat = getCategoryById(todo.categoryId);
     const isDone = isItemCompletedOnDate(todo, selectedDate);
     const pTag = cleanProjectTag(todo.projectTag);
     const repeatLabel = getRepeatLabelKo(todo.repeat, todo.dueDate);
+    const isRecurring = Boolean(todo.repeat && todo.repeat !== 'none');
+    const canDefer = !isDone && !isRecurring;
 
     const estMins = Math.max(15, Number(todo.estimatedMinutes || 30));
 
     const card = document.createElement('div');
-    card.className = `todo-item-card ${isDone ? 'completed' : ''}`;
+    card.className = `todo-item-card swipe-action-card ${isDone ? 'completed' : ''}`;
     card.innerHTML = `
       <div class="todo-left">
         <input type="checkbox" class="todo-check" ${isDone ? 'checked' : ''} aria-label="완료 체크" />
@@ -2382,7 +2562,7 @@
             <span class="cat-dot-tag" style="background:${cat.color}20;color:${cat.color}">${escapeHtml(cat.name)}</span>
             <span class="est-time-chip">${formatShortDurationKo(estMins)}</span>
             ${
-              todo.dueDate && (!todo.repeat || todo.repeat === 'none') && todo.dueDate !== selectedDate
+              todo.dueDate && !isRecurring && todo.dueDate !== selectedDate
                 ? `<span>${todo.dueDate}</span>`
                 : ''
             }
@@ -2390,15 +2570,12 @@
         </div>
       </div>
       <div class="todo-actions">
+        ${canDefer ? '<button type="button" class="todo-defer-btn" title="마감일을 내일로 미룹니다" aria-label="내일로 미루기">내일▸</button>' : ''}
         <button type="button" class="icon-play-btn todo-start-btn" title="타이머 시작 및 완료 시 타임라인 자동 기록" aria-label="타이머 시작">▶</button>
       </div>
     `;
 
-    card.querySelector('.todo-check').addEventListener('click', e => {
-      e.stopPropagation();
-    });
-    card.querySelector('.todo-check').addEventListener('change', e => {
-      const nextDone = Boolean(e.target.checked);
+    const toggleTodoDone = nextDone => {
       pushUndoSnapshot('할 일 완료 상태 변경');
       setItemCompletedOnDate(todo, selectedDate, nextDone);
       saveState();
@@ -2406,6 +2583,18 @@
       if (nextDone) {
         showToast(`'${todo.title}' 완료 처리되었습니다.`, { withUndo: true });
       }
+    };
+
+    card.querySelector('.todo-check').addEventListener('click', e => {
+      e.stopPropagation();
+    });
+    card.querySelector('.todo-check').addEventListener('change', e => {
+      toggleTodoDone(Boolean(e.target.checked));
+    });
+
+    card.querySelector('.todo-defer-btn')?.addEventListener('click', e => {
+      e.stopPropagation();
+      deferItemToNextDay('todo', todo, todo.dueDate || selectedDate);
     });
 
     card.querySelector('.todo-start-btn').addEventListener('click', e => {
@@ -2425,7 +2614,13 @@
     });
 
     makeItemDraggable(card, 'todo', todo, selectedDate);
-    card.title = '클릭하여 수정하거나 타임라인 시간대로 드래그하여 배치합니다';
+    attachCardSwipeActions(card, {
+      isDone,
+      canDefer,
+      onToggleDone: () => toggleTodoDone(!isDone),
+      onDefer: () => deferItemToNextDay('todo', todo, todo.dueDate || selectedDate)
+    });
+    card.title = '클릭하여 수정하거나 오른쪽으로 밀어 완료, 왼쪽으로 밀어 내일로 미룹니다';
 
     return card;
   }
@@ -2676,9 +2871,11 @@
     const now = new Date();
     const currentHour = now.getHours();
     const nowTimeStr = `${String(currentHour).padStart(2, '0')}:${String(now.getMinutes()).padStart(2, '0')}`;
+    const nowPct = Math.min(98, Math.max(2, (now.getMinutes() / 60) * 100));
     const isToday = selectedDate === getTodayStr();
+    lastRenderedTimelineHour = isToday ? currentHour : -1;
 
-    // 시간대별 사전 버킷 인덱싱 (O(N))
+    // 시간대별 사전 버킷 인덱싱
     const plansByHour = Array.from({ length: 24 }, () => []);
     const actualsByHour = Array.from({ length: 24 }, () => []);
     let minHour = 6;
@@ -2694,6 +2891,42 @@
       actualsByHour[h].push(a);
     });
 
+    let earlyFoldEnd = -1;
+    if (minHour === 6) {
+      for (let h = 6; h <= 7; h++) {
+        if (plansByHour[h].length === 0 && actualsByHour[h].length === 0 && !(isToday && h === currentHour)) {
+          earlyFoldEnd = h;
+        } else {
+          break;
+        }
+      }
+    }
+
+    let lateFoldStart = 24;
+    for (let h = 23; h >= 22; h--) {
+      if (plansByHour[h].length === 0 && actualsByHour[h].length === 0 && !(isToday && h === currentHour)) {
+        lateFoldStart = h;
+      } else {
+        break;
+      }
+    }
+
+    const hasFoldableIdle = earlyFoldEnd >= 6 || lateFoldStart <= 23;
+    const startHour = !timelineShowIdleHours && earlyFoldEnd >= 6 ? earlyFoldEnd + 1 : minHour;
+    const endHour = !timelineShowIdleHours && lateFoldStart <= 23 ? lateFoldStart - 1 : 23;
+
+    const createFoldBannerBtn = (label, nextExpandState) => {
+      const banner = document.createElement('button');
+      banner.type = 'button';
+      banner.className = `dt-fold-banner ${nextExpandState ? 'is-expand' : 'is-collapse'}`;
+      banner.innerHTML = `<span class="dt-fold-icon">${nextExpandState ? '▾' : '▴'}</span><span>${escapeHtml(label)}</span>`;
+      banner.addEventListener('click', () => {
+        timelineShowIdleHours = nextExpandState;
+        renderDualTimeline();
+      });
+      return banner;
+    };
+
     const prevScrollTop = scrollEl.scrollTop;
     const isDateChanged = lastScrolledTimelineDate !== selectedDate;
 
@@ -2701,13 +2934,29 @@
     const fragment = document.createDocumentFragment();
     let currentHourRowEl = null;
 
-    for (let hour = minHour; hour <= 23; hour++) {
+    if (!timelineShowIdleHours && earlyFoldEnd >= 6) {
+      fragment.appendChild(
+        createFoldBannerBtn(`이른 아침 빈 시간대 펼치기 · 06:00~${String(earlyFoldEnd + 1).padStart(2, '0')}:00`, true)
+      );
+    } else if (timelineShowIdleHours && hasFoldableIdle) {
+      fragment.appendChild(createFoldBannerBtn('빈 새벽 · 심야 시간대 접기', false));
+    }
+
+    for (let hour = startHour; hour <= endHour; hour++) {
       const hourStr = `${String(hour).padStart(2, '0')}:00`;
       const nextHourStr = hour === 23 ? '23:59' : `${String(hour + 1).padStart(2, '0')}:00`;
       const isCurrentRow = isToday && hour === currentHour;
       const row = document.createElement('div');
       row.className = `dt-hour-row ${dashTrackMode !== 'both' ? 'single-col' : ''} ${isCurrentRow ? 'current-hour-row' : ''}`;
-      if (isCurrentRow) currentHourRowEl = row;
+      if (isCurrentRow) {
+        currentHourRowEl = row;
+        const nowLine = document.createElement('div');
+        nowLine.className = 'dt-now-line';
+        nowLine.style.top = `${nowPct.toFixed(1)}%`;
+        nowLine.setAttribute('aria-hidden', 'true');
+        nowLine.innerHTML = '<span class="dt-now-dot"></span>';
+        row.appendChild(nowLine);
+      }
 
       const plansInHour = plansByHour[hour];
       const actualsInHour = actualsByHour[hour];
@@ -2860,6 +3109,12 @@
       fragment.appendChild(row);
     }
 
+    if (!timelineShowIdleHours && lateFoldStart <= 23) {
+      fragment.appendChild(
+        createFoldBannerBtn(`심야 빈 시간대 펼치기 · ${String(lateFoldStart).padStart(2, '0')}:00~24:00`, true)
+      );
+    }
+
     scrollEl.appendChild(fragment);
 
     // 날짜 변경 시 오늘이면 현재 시각 행으로 자동 포커스, 같은 날짜 재렌더링 시 스크롤 위치 유지
@@ -2874,6 +3129,27 @@
       });
     } else if (prevScrollTop > 0) {
       scrollEl.scrollTop = prevScrollTop;
+    }
+  }
+
+  function refreshLiveTimelineNowLine() {
+    if (selectedDate !== getTodayStr()) return;
+    const now = new Date();
+    const h = now.getHours();
+    if (lastRenderedTimelineHour !== -1 && lastRenderedTimelineHour !== h) {
+      renderDualTimeline();
+      return;
+    }
+    const scrollEl = document.getElementById('dualTimelineScroll');
+    if (!scrollEl) return;
+    const lineEl = scrollEl.querySelector('.dt-now-line');
+    const badgeEl = scrollEl.querySelector('.dt-now-badge');
+    const pct = Math.min(98, Math.max(2, (now.getMinutes() / 60) * 100));
+    if (lineEl) {
+      lineEl.style.top = `${pct.toFixed(1)}%`;
+    }
+    if (badgeEl) {
+      badgeEl.textContent = `지금 ${String(h).padStart(2, '0')}:${String(now.getMinutes()).padStart(2, '0')}`;
     }
   }
 
@@ -4187,6 +4463,10 @@
           </div>
         `;
 
+        const isPlanRecurring = Boolean(plan.repeat && plan.repeat !== 'none');
+        const canDeferPlan = !isDone && !isPlanRecurring;
+        row.classList.add('swipe-action-card');
+
         row.querySelector('.dd-check').addEventListener('click', e => {
           e.stopPropagation();
           toggleScheduleCompletedWithActualSync(plan, dateStr, Boolean(e.target.checked), true);
@@ -4200,9 +4480,20 @@
         });
 
         row.addEventListener('click', e => {
-          if (e.target.classList.contains('dd-check') || e.target.closest('.dd-play-btn')) return;
+          if (e.target.classList.contains('dd-check') || e.target.closest('button') || isJustDraggedOrResized()) return;
           selectedDate = dateStr;
           openItemModalForEdit('schedule', plan);
+        });
+
+        attachCardSwipeActions(row, {
+          isDone,
+          canDefer: canDeferPlan,
+          onToggleDone: () => {
+            toggleScheduleCompletedWithActualSync(plan, dateStr, !isDone, true);
+            saveState();
+            renderAll();
+          },
+          onDefer: () => deferItemToNextDay('schedule', plan, dateStr)
         });
 
         list.appendChild(row);
@@ -4225,9 +4516,10 @@
         const isDone = isItemCompletedOnDate(todo, dateStr);
         const pTag = cleanProjectTag(todo.projectTag);
         const repLabel = getRepeatLabelKo(todo.repeat, todo.dueDate);
-        const isRecurring = todo.repeat && todo.repeat !== 'none';
+        const isRecurring = Boolean(todo.repeat && todo.repeat !== 'none');
+        const canDeferTodo = !isDone && !isRecurring;
         const row = document.createElement('div');
-        row.className = `dd-item-row ${isDone ? 'is-done' : ''}`;
+        row.className = `dd-item-row swipe-action-card ${isDone ? 'is-done' : ''}`;
         row.style.borderLeftColor = cat.color;
         row.innerHTML = `
           <input type="checkbox" class="dd-check" ${isDone ? 'checked' : ''} title="완료 상태 전환" />
@@ -4243,6 +4535,7 @@
             <div class="dd-item-title">${escapeHtml(todo.title)}</div>
           </div>
           <div class="dd-actions">
+            ${canDeferTodo ? '<button type="button" class="todo-defer-btn" title="마감일을 내일로 미룹니다">내일▸</button>' : ''}
             ${isToday && !isDone ? '<button type="button" class="icon-play-btn dd-play-btn" title="지금 바로 타이머 시작">▶</button>' : ''}
           </div>
         `;
@@ -4255,15 +4548,32 @@
           renderAll();
         });
 
+        row.querySelector('.todo-defer-btn')?.addEventListener('click', e => {
+          e.stopPropagation();
+          deferItemToNextDay('todo', todo, dateStr);
+        });
+
         row.querySelector('.dd-play-btn')?.addEventListener('click', e => {
           e.stopPropagation();
           startLiveTrackerWith(todo.title, todo.categoryId, pTag, { type: 'todo', id: todo.id });
         });
 
         row.addEventListener('click', e => {
-          if (e.target.classList.contains('dd-check') || e.target.closest('.dd-play-btn')) return;
+          if (e.target.classList.contains('dd-check') || e.target.closest('button') || isJustDraggedOrResized()) return;
           selectedDate = dateStr;
           openItemModalForEdit('todo', todo);
+        });
+
+        attachCardSwipeActions(row, {
+          isDone,
+          canDefer: canDeferTodo,
+          onToggleDone: () => {
+            pushUndoSnapshot('할 일 완료 상태 변경');
+            setItemCompletedOnDate(todo, dateStr, !isDone);
+            saveState();
+            renderAll();
+          },
+          onDefer: () => deferItemToNextDay('todo', todo, dateStr)
         });
 
         list.appendChild(row);
@@ -4897,8 +5207,10 @@
     combined.slice(0, 20).forEach(item => {
       const cat = getCategoryById(item.categoryId);
       const dday = getDdayBadgeInfo(item.date, item.completed);
+      const isRecurringMs = Boolean(item.ref.repeat && item.ref.repeat !== 'none');
+      const canDeferMs = !item.completed && !isRecurringMs;
       const el = document.createElement('div');
-      el.className = `milestone-item ${item.completed ? 'is-done' : ''}`;
+      el.className = `milestone-item swipe-action-card ${item.completed ? 'is-done' : ''}`;
       el.innerHTML = `
         <div class="ms-item-top">
           <div class="ms-badges-left">
@@ -4920,22 +5232,33 @@
         </div>
       `;
 
-      el.querySelector('.ms-check').addEventListener('click', e => {
-        e.stopPropagation();
+      const toggleMsDone = nextDone => {
         if (item.kind === 'schedule') {
-          toggleScheduleCompletedWithActualSync(item.ref, item.date, Boolean(e.target.checked), true);
+          toggleScheduleCompletedWithActualSync(item.ref, item.date, nextDone, true);
         } else {
           pushUndoSnapshot('할 일 완료 상태 변경');
-          setItemCompletedOnDate(item.ref, item.date, Boolean(e.target.checked));
+          setItemCompletedOnDate(item.ref, item.date, nextDone);
         }
         saveState();
         renderAll();
+      };
+
+      el.querySelector('.ms-check').addEventListener('click', e => {
+        e.stopPropagation();
+        toggleMsDone(Boolean(e.target.checked));
       });
 
       el.addEventListener('click', e => {
-        if (e.target.classList.contains('ms-check')) return;
+        if (e.target.classList.contains('ms-check') || isJustDraggedOrResized()) return;
         selectedDate = item.date;
         openItemModalForEdit(item.kind === 'todo' ? 'todo' : 'schedule', item.ref);
+      });
+
+      attachCardSwipeActions(el, {
+        isDone: item.completed,
+        canDefer: canDeferMs,
+        onToggleDone: () => toggleMsDone(!item.completed),
+        onDefer: () => deferItemToNextDay(item.kind === 'todo' ? 'todo' : 'schedule', item.ref, item.date)
       });
 
       container.appendChild(el);
@@ -5665,6 +5988,9 @@
         previewEl.textContent = '시간이나 @프로젝트태그, 매주·매일 키워드를 포함하면 자동 분류됩니다.';
       }
       inputEl.blur();
+      if (mobileQuickInputOpen) {
+        closeModalWindow('quickInputSection');
+      }
     };
 
     try {
@@ -7742,33 +8068,50 @@
       });
     });
 
+    document.getElementById('mobileQuickFabBtn')?.addEventListener('click', () => {
+      if (mobileQuickInputOpen) {
+        closeModalWindow('quickInputSection');
+        return;
+      }
+      openModalWindow('quickInputSection');
+      setTimeout(() => quickInputEl?.focus(), 40);
+    });
+    document.getElementById('closeMobileQuickBtn')?.addEventListener('click', () => {
+      closeModalWindow('quickInputSection');
+    });
+    document.getElementById('mobileQuickBackdrop')?.addEventListener('click', () => {
+      closeModalWindow('quickInputSection');
+    });
+
     document.getElementById('quickInputForm').addEventListener('submit', e => {
       e.preventDefault();
       const parsed = parseNaturalQuickInput(quickInputEl.value, quickModeEl.value, quickCatEl.value);
       if (!parsed) return;
+      pushUndoSnapshot('빠른 항목 등록');
       applyParsedQuickItem(parsed);
       quickInputEl.value = '';
       quickSectionEl?.classList.remove('has-value');
       quickInputEl.blur();
       updatePreview();
+      if (mobileQuickInputOpen) {
+        closeModalWindow('quickInputSection');
+      }
       saveState();
       renderAll();
-      showToast(`'${parsed.title}' 등록 완료`);
+      showToast(`'${parsed.title}' 등록 완료`, { withUndo: true });
     });
 
     document.getElementById('aiSmartParseBtn').addEventListener('click', handleAiSmartParse);
 
+    const stepDashboardDay = delta => {
+      selectedDate = addDaysStr(selectedDate, delta);
+      syncCalCursorsToSelectedDate(true);
+      renderAll();
+    };
+
     // 날짜 이동 및 날짜 바로 선택
-    document.getElementById('prevDayBtn').addEventListener('click', () => {
-      selectedDate = addDaysStr(selectedDate, -1);
-      syncCalCursorsToSelectedDate(true);
-      renderAll();
-    });
-    document.getElementById('nextDayBtn').addEventListener('click', () => {
-      selectedDate = addDaysStr(selectedDate, 1);
-      syncCalCursorsToSelectedDate(true);
-      renderAll();
-    });
+    document.getElementById('prevDayBtn').addEventListener('click', () => stepDashboardDay(-1));
+    document.getElementById('nextDayBtn').addEventListener('click', () => stepDashboardDay(1));
     document.getElementById('goTodayBtn').addEventListener('click', () => {
       selectedDate = getTodayStr();
       miniCalCursor = new Date();
@@ -8233,9 +8576,9 @@
       });
     });
 
-    document.getElementById('calPrevBtn').addEventListener('click', () => {
+    const stepCalendarPeriod = dir => {
       if (currentCalView === 'month') {
-        fullCalCursor = new Date(fullCalCursor.getFullYear(), fullCalCursor.getMonth() - 1, 1);
+        fullCalCursor = new Date(fullCalCursor.getFullYear(), fullCalCursor.getMonth() + dir, 1);
         const todayStr = getTodayStr();
         const [ty, tm] = todayStr.split('-').map(Number);
         selectedDate =
@@ -8243,26 +8586,14 @@
             ? todayStr
             : toDateStr(new Date(fullCalCursor.getFullYear(), fullCalCursor.getMonth(), 1));
       } else {
-        selectedDate = addDaysStr(selectedDate, -7);
+        selectedDate = addDaysStr(selectedDate, dir * 7);
         syncCalCursorsToSelectedDate(true);
       }
       renderCalendarOverviewTab();
-    });
-    document.getElementById('calNextBtn').addEventListener('click', () => {
-      if (currentCalView === 'month') {
-        fullCalCursor = new Date(fullCalCursor.getFullYear(), fullCalCursor.getMonth() + 1, 1);
-        const todayStr = getTodayStr();
-        const [ty, tm] = todayStr.split('-').map(Number);
-        selectedDate =
-          fullCalCursor.getFullYear() === ty && fullCalCursor.getMonth() === tm - 1
-            ? todayStr
-            : toDateStr(new Date(fullCalCursor.getFullYear(), fullCalCursor.getMonth(), 1));
-      } else {
-        selectedDate = addDaysStr(selectedDate, 7);
-        syncCalCursorsToSelectedDate(true);
-      }
-      renderCalendarOverviewTab();
-    });
+    };
+
+    document.getElementById('calPrevBtn').addEventListener('click', () => stepCalendarPeriod(-1));
+    document.getElementById('calNextBtn').addEventListener('click', () => stepCalendarPeriod(1));
     document.getElementById('calTodayBtn')?.addEventListener('click', () => {
       selectedDate = getTodayStr();
       fullCalCursor = new Date();
@@ -8299,19 +8630,16 @@
       syncCalendarPanelsUI();
     });
 
+    const stepDayDetailModal = dir => {
+      dayDetailDate = addDaysStr(dayDetailDate || selectedDate, dir);
+      selectedDate = dayDetailDate;
+      syncCalCursorsToSelectedDate(true);
+      renderAll();
+    };
+
     // 월간 날짜 자세히 보기 모달 내부 네비게이션 및 빠른 추가 버튼
-    document.getElementById('dayDetailPrevBtn')?.addEventListener('click', () => {
-      dayDetailDate = addDaysStr(dayDetailDate || selectedDate, -1);
-      selectedDate = dayDetailDate;
-      syncCalCursorsToSelectedDate(true);
-      renderAll();
-    });
-    document.getElementById('dayDetailNextBtn')?.addEventListener('click', () => {
-      dayDetailDate = addDaysStr(dayDetailDate || selectedDate, 1);
-      selectedDate = dayDetailDate;
-      syncCalCursorsToSelectedDate(true);
-      renderAll();
-    });
+    document.getElementById('dayDetailPrevBtn')?.addEventListener('click', () => stepDayDetailModal(-1));
+    document.getElementById('dayDetailNextBtn')?.addEventListener('click', () => stepDayDetailModal(1));
     document.getElementById('dayDetailGoTimelineBtn')?.addEventListener('click', () => {
       if (dayDetailDate) selectedDate = dayDetailDate;
       syncCalCursorsToSelectedDate(false);
@@ -8607,6 +8935,158 @@
       });
     });
 
+    const bindMobileSheetSwipeToClose = (sheetEl, overlayId) => {
+      if (!sheetEl) return;
+      let startX = 0;
+      let startY = 0;
+      let startTime = 0;
+      let deltaY = 0;
+      let canPullDown = false;
+      let dragging = false;
+
+      const isScrolledInside = targetNode => {
+        let cur = targetNode;
+        while (cur && cur !== sheetEl && cur instanceof HTMLElement) {
+          if (cur.scrollHeight > cur.clientHeight + 2 && cur.scrollTop > 2) {
+            return true;
+          }
+          cur = cur.parentElement;
+        }
+        return sheetEl.scrollHeight > sheetEl.clientHeight + 2 && sheetEl.scrollTop > 2;
+      };
+
+      sheetEl.addEventListener(
+        'touchstart',
+        e => {
+          if (window.innerWidth > 768 || e.touches.length !== 1) return;
+          if (e.target.closest('input[type="range"], select')) return;
+          const startedOnHead = Boolean(
+            e.target.closest('.modal-head, .panel-head, .mobile-quick-sheet-head, .sheet-drag-handle')
+          );
+          canPullDown = startedOnHead || !isScrolledInside(e.target);
+          if (!canPullDown) return;
+          startX = e.touches[0].clientX;
+          startY = e.touches[0].clientY;
+          startTime = Date.now();
+          deltaY = 0;
+          dragging = false;
+        },
+        { passive: true }
+      );
+
+      sheetEl.addEventListener(
+        'touchmove',
+        e => {
+          if (!canPullDown || window.innerWidth > 768 || e.touches.length !== 1) return;
+          const dx = e.touches[0].clientX - startX;
+          const dy = e.touches[0].clientY - startY;
+          if (!dragging) {
+            if (dy < 10) {
+              if (dy < -8 || Math.abs(dx) > 14) canPullDown = false;
+              return;
+            }
+            if (Math.abs(dx) * 1.25 > dy) {
+              canPullDown = false;
+              return;
+            }
+            dragging = true;
+          }
+          deltaY = Math.max(0, dy);
+          sheetEl.style.transition = 'none';
+          sheetEl.style.transform = `translateY(${(deltaY * 0.88).toFixed(1)}px)`;
+        },
+        { passive: true }
+      );
+
+      const finishPull = () => {
+        if (!dragging) {
+          canPullDown = false;
+          return;
+        }
+        const elapsed = Math.max(1, Date.now() - startTime);
+        const velocity = deltaY / elapsed;
+        const shouldClose = deltaY >= 72 || (deltaY >= 38 && velocity >= 0.55);
+        dragging = false;
+        canPullDown = false;
+        deltaY = 0;
+        lastDragOrResizeAt = Date.now();
+
+        if (shouldClose) {
+          sheetEl.style.transition = '';
+          sheetEl.style.transform = '';
+          closeModalWindow(overlayId);
+        } else {
+          sheetEl.style.transition = 'transform 0.2s ease-out';
+          sheetEl.style.transform = '';
+        }
+      };
+
+      sheetEl.addEventListener('touchend', finishPull, { passive: true });
+      sheetEl.addEventListener('touchcancel', finishPull, { passive: true });
+    };
+
+    const bindHorizontalSwipeNav = (containerEl, { onPrev, onNext }) => {
+      if (!containerEl) return;
+      let startX = 0;
+      let startY = 0;
+      let startAt = 0;
+      let eligible = false;
+
+      containerEl.addEventListener(
+        'touchstart',
+        e => {
+          if (e.touches.length !== 1) {
+            eligible = false;
+            return;
+          }
+          if (
+            e.target.closest(
+              'input, textarea, select, button, .tb-resize-handle, .swipe-action-card, .mode-pill-group, .filter-tabs, .ptag-chip-list, .cal-head-right'
+            )
+          ) {
+            eligible = false;
+            return;
+          }
+          if (durationResizeEnabled && e.target.closest('.timeline-block, .wk-tt-chip')) {
+            eligible = false;
+            return;
+          }
+          startX = e.touches[0].clientX;
+          startY = e.touches[0].clientY;
+          startAt = Date.now();
+          eligible = true;
+        },
+        { passive: true }
+      );
+
+      containerEl.addEventListener(
+        'touchend',
+        e => {
+          if (!eligible || e.changedTouches.length !== 1) return;
+          eligible = false;
+          const dt = Date.now() - startAt;
+          if (dt > 680) return;
+          const dx = e.changedTouches[0].clientX - startX;
+          const dy = e.changedTouches[0].clientY - startY;
+          if (Math.abs(dx) < 64 || Math.abs(dx) < Math.abs(dy) * 1.8) return;
+
+          lastDragOrResizeAt = Date.now();
+          const animCls = dx > 0 ? 'swipe-nav-prev' : 'swipe-nav-next';
+          containerEl.classList.remove('swipe-nav-prev', 'swipe-nav-next');
+          void containerEl.offsetWidth;
+          containerEl.classList.add(animCls);
+          setTimeout(() => containerEl.classList.remove(animCls), 210);
+
+          if (dx > 0) {
+            onPrev?.();
+          } else {
+            onNext?.();
+          }
+        },
+        { passive: true }
+      );
+    };
+
     closableModalIds.forEach(modalId => {
       const backdropEl = document.getElementById(modalId);
       backdropEl?.addEventListener('click', e => {
@@ -8614,6 +9094,30 @@
           closeModalWindow(modalId);
         }
       });
+      const boxEl = backdropEl?.querySelector('.modal-box');
+      if (boxEl) {
+        bindMobileSheetSwipeToClose(boxEl, modalId);
+      }
+    });
+
+    bindMobileSheetSwipeToClose(document.getElementById('calendarSidePanel'), 'calendarSidePanel');
+    bindMobileSheetSwipeToClose(document.getElementById('quickInputSection'), 'quickInputSection');
+
+    bindHorizontalSwipeNav(document.getElementById('dualTimelineScroll'), {
+      onPrev: () => stepDashboardDay(-1),
+      onNext: () => stepDashboardDay(1)
+    });
+    bindHorizontalSwipeNav(document.getElementById('monthCalendarView'), {
+      onPrev: () => stepCalendarPeriod(-1),
+      onNext: () => stepCalendarPeriod(1)
+    });
+    bindHorizontalSwipeNav(document.getElementById('weekBoardScrollWrap'), {
+      onPrev: () => stepCalendarPeriod(-1),
+      onNext: () => stepCalendarPeriod(1)
+    });
+    bindHorizontalSwipeNav(document.querySelector('#dayDetailModal .day-detail-modal-box'), {
+      onPrev: () => stepDayDetailModal(-1),
+      onNext: () => stepDayDetailModal(1)
     });
 
     document.addEventListener('keydown', e => {
@@ -8655,6 +9159,7 @@
     if (routinePlayer.running && !routinePlayer.paused) {
       tickRoutinePlayer();
     }
+    refreshLiveTimelineNowLine();
     checkScheduledAlarms();
     if (Date.now() - lastAutoCloudPullAt > 45000) {
       checkCloudLatestOnStartup(true);
@@ -8668,6 +9173,12 @@
     } catch (_) {}
     window.addEventListener('popstate', handleOverlayPopState);
     window.addEventListener('resize', () => {
+      if (mobileQuickInputOpen && !isMobileQuickFabViewport()) {
+        closeModalWindow('quickInputSection');
+      } else {
+        syncMobileQuickInputUI();
+      }
+
       if (!calSideOpen) return;
       const inMobileModal = isMobileMilestoneModalViewport();
       const inStack = overlayHistoryStack.includes('calendarSidePanel');
@@ -8689,6 +9200,7 @@
     });
 
     applyThemeUI();
+    syncMobileQuickInputUI();
     refreshKoreanSpeechVoice();
     if ('speechSynthesis' in window && typeof window.speechSynthesis.addEventListener === 'function') {
       window.speechSynthesis.addEventListener('voiceschanged', refreshKoreanSpeechVoice);
@@ -8704,8 +9216,11 @@
     checkScheduledAlarms();
     checkCloudLatestOnStartup(true);
 
-    // 매 15초마다 정각 및 사전 예고 알람 체크
-    setInterval(checkScheduledAlarms, 15000);
+    // 매 15초마다 정각 및 사전 예고 알람 체크 + 타임라인 현재 시각 기준선 동기화
+    setInterval(() => {
+      checkScheduledAlarms();
+      refreshLiveTimelineNowLine();
+    }, 15000);
 
     document.addEventListener('visibilitychange', () => {
       if (document.visibilityState === 'visible') {
