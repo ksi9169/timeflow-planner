@@ -374,6 +374,9 @@
         syncCode: '',
         autoSync: true,
         darkMode: false,
+        timelineStartHour: 6,
+        timelineEndHour: 24,
+        autoFoldIdleHours: true,
         streakDays: 1,
         weeklyMonthlySeeded: true,
         projectTagSeeded: true
@@ -867,7 +870,142 @@
   let dayDetailDate = '';
   let mobileQuickInputOpen = false;
   let timelineShowIdleHours = false;
+  let timelineRangeDrawerOpen = false;
+  let routineFocusMode = false;
+  let timerBannerMinimized = false;
   let lastRenderedTimelineHour = -1;
+
+  function triggerHaptic(pattern = 35) {
+    try {
+      if (typeof navigator !== 'undefined' && typeof navigator.vibrate === 'function') {
+        navigator.vibrate(pattern);
+      }
+    } catch (_) {}
+  }
+
+  function getTimelineRangeConfig() {
+    const rawStart = Number(state.settings?.timelineStartHour);
+    const rawEnd = Number(state.settings?.timelineEndHour);
+    const startHour = Number.isFinite(rawStart) ? Math.max(0, Math.min(10, Math.round(rawStart))) : 6;
+    const endHour = Number.isFinite(rawEnd) ? Math.max(20, Math.min(28, Math.round(rawEnd))) : 24;
+    const autoFold = state.settings?.autoFoldIdleHours !== false;
+    return { startHour, endHour, autoFold };
+  }
+
+  function formatTimelineRangeShortLabel(startHour, endHour) {
+    const startTxt = String(startHour).padStart(2, '0');
+    if (endHour > 24) {
+      return `${startTxt}~익일 ${String(endHour - 24).padStart(2, '0')}시`;
+    }
+    return `${startTxt}~${String(endHour).padStart(2, '0')}시`;
+  }
+
+  function resolveTimelineHourMeta(baseDateStr, hour) {
+    if (hour >= 24) {
+      const realHour = hour - 24;
+      const slotDate = addDaysStr(baseDateStr, 1);
+      const realHourStr = `${String(realHour).padStart(2, '0')}:00`;
+      const nextRealHourStr = `${String(realHour + 1).padStart(2, '0')}:00`;
+      return {
+        slotDate,
+        realHour,
+        realHourStr,
+        nextRealHourStr,
+        rowLabel: `익일 ${realHourStr}`,
+        shortSlotLabel: `익일 ${realHourStr}`,
+        isExtendedNextDay: true,
+        isMidnightBoundary: hour === 24
+      };
+    }
+    const realHourStr = `${String(hour).padStart(2, '0')}:00`;
+    const nextRealHourStr = hour === 23 ? '23:59' : `${String(hour + 1).padStart(2, '0')}:00`;
+    return {
+      slotDate: baseDateStr,
+      realHour: hour,
+      realHourStr,
+      nextRealHourStr,
+      rowLabel: realHourStr,
+      shortSlotLabel: realHourStr,
+      isExtendedNextDay: false,
+      isMidnightBoundary: false
+    };
+  }
+
+  function syncTimelineRangeControlsUI() {
+    const { startHour, endHour, autoFold } = getTimelineRangeConfig();
+    const shortLabel = formatTimelineRangeShortLabel(startHour, endHour);
+    const isCustom = startHour !== 6 || endHour !== 24;
+
+    document.querySelectorAll('.js-toggle-time-range').forEach(btn => {
+      btn.classList.toggle('active', timelineRangeDrawerOpen || isCustom);
+      btn.setAttribute('aria-expanded', String(timelineRangeDrawerOpen));
+      btn.textContent = `${shortLabel} ${timelineRangeDrawerOpen ? '▴' : '▾'}`;
+    });
+
+    const dashBar = document.getElementById('timelineRangeBar');
+    dashBar?.classList.toggle('hidden', !timelineRangeDrawerOpen);
+
+    const effectiveWeekLayout = isMobileCalendarViewport() ? 'board' : calWeekLayout;
+    const calBar = document.getElementById('calWeekRangeBar');
+    calBar?.classList.toggle(
+      'hidden',
+      !(timelineRangeDrawerOpen && currentCalView === 'week' && effectiveWeekLayout === 'timetable')
+    );
+
+    document.querySelectorAll('.js-time-start-select').forEach(sel => {
+      sel.value = String(startHour);
+    });
+    document.querySelectorAll('.js-time-end-select').forEach(sel => {
+      sel.value = String(endHour);
+    });
+    document.querySelectorAll('.js-auto-fold-check').forEach(chk => {
+      chk.checked = autoFold;
+    });
+    document.querySelectorAll('.time-range-preset-btn').forEach(btn => {
+      const pStart = Number(btn.dataset.start);
+      const pEnd = Number(btn.dataset.end);
+      btn.classList.toggle('active', pStart === startHour && pEnd === endHour);
+    });
+  }
+
+  function syncRoutineFocusModeUI() {
+    document.body.classList.toggle('is-routine-focus-mode', routineFocusMode);
+    const btn = document.getElementById('playerFocusModeBtn');
+    if (btn) {
+      btn.classList.toggle('active', routineFocusMode);
+      btn.setAttribute('aria-pressed', String(routineFocusMode));
+      btn.textContent = routineFocusMode ? '집중 종료' : '집중 모드';
+    }
+    updateTopBannerUI();
+  }
+
+  function partitionOverlappingClusters(items) {
+    if (!Array.isArray(items) || items.length === 0) return [];
+    const clusters = [];
+    let currentCluster = [];
+    let clusterMaxEnd = -1;
+
+    items.forEach(item => {
+      const st = timeToMinutes(item.startTime);
+      const et = Math.max(st + 15, timeToMinutes(item.endTime));
+      if (currentCluster.length === 0) {
+        currentCluster.push(item);
+        clusterMaxEnd = et;
+      } else if (st < clusterMaxEnd) {
+        currentCluster.push(item);
+        if (et > clusterMaxEnd) clusterMaxEnd = et;
+      } else {
+        clusters.push(currentCluster);
+        currentCluster = [item];
+        clusterMaxEnd = et;
+      }
+    });
+
+    if (currentCluster.length > 0) {
+      clusters.push(currentCluster);
+    }
+    return clusters;
+  }
 
   // 모달 · 팝업 창 브라우저 뒤로가기 연동 스택
   const overlayHistoryStack = [];
@@ -905,8 +1043,10 @@
   }
 
   function syncOverlayStackZIndex() {
-    document.body.classList.toggle('has-open-overlay', overlayHistoryStack.length > 0);
+    const hasModalOverlay = overlayHistoryStack.some(id => id !== 'routineFocusMode');
+    document.body.classList.toggle('has-open-overlay', hasModalOverlay);
     overlayHistoryStack.forEach((id, idx) => {
+      if (id === 'routineFocusMode') return;
       const baseZ = 200 + idx * 10;
       if (id === 'calendarSidePanel') {
         const backdrop = document.getElementById('calendarSideBackdrop');
@@ -967,6 +1107,11 @@
   }
 
   function hideOverlayDomOnly(modalId) {
+    if (modalId === 'routineFocusMode') {
+      routineFocusMode = false;
+      syncRoutineFocusModeUI();
+      return;
+    }
     if (modalId === 'alarmModal') {
       clearInterval(alarmRepeatIntervalId);
     }
@@ -1010,7 +1155,10 @@
   }
 
   function openModalWindow(modalId) {
-    if (modalId === 'calendarSidePanel') {
+    if (modalId === 'routineFocusMode') {
+      routineFocusMode = true;
+      syncRoutineFocusModeUI();
+    } else if (modalId === 'calendarSidePanel') {
       calSideOpen = true;
       const panel = document.getElementById('calendarSidePanel');
       if (panel) {
@@ -2010,6 +2158,8 @@
     renderCategorySelects();
     renderProjectTagFilterBar();
     syncDurationResizeModeUI();
+    syncTimelineRangeControlsUI();
+    syncRoutineFocusModeUI();
     renderActiveTabViews(forceAllTabs);
     if (dayDetailDate && !document.getElementById('dayDetailModal')?.classList.contains('hidden')) {
       renderDayDetailModalContent(dayDetailDate);
@@ -2847,12 +2997,18 @@
     const headerActualCol = document.getElementById('dtHeaderActualCol');
     if (!scrollEl || !headerEl) return;
 
+    syncTimelineRangeControlsUI();
+
     const showPlan = dashTrackMode === 'both' || dashTrackMode === 'plan';
     const showActual = dashTrackMode === 'both' || dashTrackMode === 'actual';
 
     headerEl.classList.toggle('single-col', dashTrackMode !== 'both');
     headerPlanCol.classList.toggle('hidden', !showPlan);
     headerActualCol.classList.toggle('hidden', !showActual);
+
+    const { startHour: cfgStartHour, endHour: cfgEndHour, autoFold } = getTimelineRangeConfig();
+    const maxHourIdx = cfgEndHour - 1;
+    const totalBucketCount = Math.max(24, cfgEndHour);
 
     const dayPlans = state.schedules
       .filter(s => matchesSelectedProjectTag(s) && doesItemOccurOnDate(s, selectedDate, false))
@@ -2862,8 +3018,39 @@
       .filter(a => matchesSelectedProjectTag(a) && a.date === selectedDate)
       .sort((a, b) => timeToMinutes(a.startTime) - timeToMinutes(b.startTime));
 
-    const totalPlanMins = dayPlans.reduce((s, x) => s + durationMinutes(x.startTime, x.endTime), 0);
-    const totalActualMins = dayActuals.reduce((s, x) => s + durationMinutes(x.startTime, x.endTime), 0);
+    const nextDateStr = addDaysStr(selectedDate, 1);
+    const extHourLimit = Math.max(0, cfgEndHour - 24);
+    const extPlans =
+      extHourLimit > 0
+        ? state.schedules
+            .filter(
+              s =>
+                matchesSelectedProjectTag(s) &&
+                doesItemOccurOnDate(s, nextDateStr, false) &&
+                Math.floor(timeToMinutes(s.startTime) / 60) < extHourLimit
+            )
+            .sort((a, b) => timeToMinutes(a.startTime) - timeToMinutes(b.startTime))
+        : [];
+    const extActuals =
+      extHourLimit > 0
+        ? state.actualLogs
+            .filter(
+              a =>
+                matchesSelectedProjectTag(a) &&
+                a.date === nextDateStr &&
+                Math.floor(timeToMinutes(a.startTime) / 60) < extHourLimit
+            )
+            .sort((a, b) => timeToMinutes(a.startTime) - timeToMinutes(b.startTime))
+        : [];
+
+    const totalPlanMins = [...dayPlans, ...extPlans].reduce(
+      (s, x) => s + durationMinutes(x.startTime, x.endTime),
+      0
+    );
+    const totalActualMins = [...dayActuals, ...extActuals].reduce(
+      (s, x) => s + durationMinutes(x.startTime, x.endTime),
+      0
+    );
     if (summaryEl) {
       summaryEl.textContent = `계획 ${formatDurationKo(totalPlanMins)} · 실행 ${formatDurationKo(totalActualMins)}`;
     }
@@ -2872,13 +3059,16 @@
     const currentHour = now.getHours();
     const nowTimeStr = `${String(currentHour).padStart(2, '0')}:${String(now.getMinutes()).padStart(2, '0')}`;
     const nowPct = Math.min(98, Math.max(2, (now.getMinutes() / 60) * 100));
-    const isToday = selectedDate === getTodayStr();
-    lastRenderedTimelineHour = isToday ? currentHour : -1;
+    const todayStr = getTodayStr();
+    const isToday = selectedDate === todayStr;
+    const isExtendedTonight = extHourLimit > 0 && nextDateStr === todayStr && currentHour < extHourLimit;
+    const activeLiveHourIdx = isToday ? currentHour : isExtendedTonight ? 24 + currentHour : -1;
+    lastRenderedTimelineHour = activeLiveHourIdx;
 
     // 시간대별 사전 버킷 인덱싱
-    const plansByHour = Array.from({ length: 24 }, () => []);
-    const actualsByHour = Array.from({ length: 24 }, () => []);
-    let minHour = 6;
+    const plansByHour = Array.from({ length: totalBucketCount }, () => []);
+    const actualsByHour = Array.from({ length: totalBucketCount }, () => []);
+    let minHour = cfgStartHour;
 
     dayPlans.forEach(p => {
       const h = Math.max(0, Math.min(23, Math.floor(timeToMinutes(p.startTime) / 60)));
@@ -2890,30 +3080,48 @@
       if (h < minHour) minHour = h;
       actualsByHour[h].push(a);
     });
+    extPlans.forEach(p => {
+      const h = 24 + Math.max(0, Math.min(extHourLimit - 1, Math.floor(timeToMinutes(p.startTime) / 60)));
+      if (plansByHour[h]) plansByHour[h].push(p);
+    });
+    extActuals.forEach(a => {
+      const h = 24 + Math.max(0, Math.min(extHourLimit - 1, Math.floor(timeToMinutes(a.startTime) / 60)));
+      if (actualsByHour[h]) actualsByHour[h].push(a);
+    });
 
     let earlyFoldEnd = -1;
-    if (minHour === 6) {
-      for (let h = 6; h <= 7; h++) {
-        if (plansByHour[h].length === 0 && actualsByHour[h].length === 0 && !(isToday && h === currentHour)) {
-          earlyFoldEnd = h;
+    let lateFoldStart = maxHourIdx + 1;
+
+    if (autoFold) {
+      if (minHour === cfgStartHour && minHour <= 7) {
+        const earlyFoldMax = Math.min(minHour + 1, 7);
+        for (let h = minHour; h <= earlyFoldMax; h++) {
+          if (plansByHour[h].length === 0 && actualsByHour[h].length === 0 && h !== activeLiveHourIdx) {
+            earlyFoldEnd = h;
+          } else {
+            break;
+          }
+        }
+      }
+      const lateFoldMin = Math.max(maxHourIdx - 1, 22);
+      for (let h = maxHourIdx; h >= lateFoldMin; h--) {
+        if (plansByHour[h].length === 0 && actualsByHour[h].length === 0 && h !== activeLiveHourIdx) {
+          lateFoldStart = h;
         } else {
           break;
         }
       }
     }
 
-    let lateFoldStart = 24;
-    for (let h = 23; h >= 22; h--) {
-      if (plansByHour[h].length === 0 && actualsByHour[h].length === 0 && !(isToday && h === currentHour)) {
-        lateFoldStart = h;
-      } else {
-        break;
-      }
-    }
+    const hasFoldableIdle = earlyFoldEnd >= minHour || lateFoldStart <= maxHourIdx;
+    const startHour = !timelineShowIdleHours && earlyFoldEnd >= minHour ? earlyFoldEnd + 1 : minHour;
+    const endHour = !timelineShowIdleHours && lateFoldStart <= maxHourIdx ? lateFoldStart - 1 : maxHourIdx;
 
-    const hasFoldableIdle = earlyFoldEnd >= 6 || lateFoldStart <= 23;
-    const startHour = !timelineShowIdleHours && earlyFoldEnd >= 6 ? earlyFoldEnd + 1 : minHour;
-    const endHour = !timelineShowIdleHours && lateFoldStart <= 23 ? lateFoldStart - 1 : 23;
+    const formatFoldBoundaryLabel = hVal => {
+      if (hVal > 24) return `익일 ${String(hVal - 24).padStart(2, '0')}:00`;
+      if (hVal === 24) return '24:00';
+      return `${String(hVal).padStart(2, '0')}:00`;
+    };
 
     const createFoldBannerBtn = (label, nextExpandState) => {
       const banner = document.createElement('button');
@@ -2927,6 +3135,130 @@
       return banner;
     };
 
+    const buildPlanBlock = (p, slotDate, isOverlapCompact = false) => {
+      const cat = getCategoryById(p.categoryId);
+      const isPlanDone = isItemCompletedOnDate(p, slotDate);
+      const pTag = cleanProjectTag(p.projectTag);
+      const repLabel = getRepeatLabelKo(p.repeat, p.date);
+      const dur = durationMinutes(p.startTime, p.endTime);
+      const block = document.createElement('div');
+      block.className = [
+        'timeline-block',
+        isPlanDone ? 'is-completed-block' : '',
+        isOverlapCompact ? 'is-overlap-compact' : ''
+      ]
+        .filter(Boolean)
+        .join(' ');
+      block.style.background = `${cat.color}16`;
+      block.style.borderLeftColor = cat.color;
+      block.style.minHeight = `${calcBlockMinHeightPx(dur)}px`;
+      block.innerHTML = `
+        <div class="tb-left-row">
+          <input type="checkbox" class="tb-plan-check" ${isPlanDone ? 'checked' : ''} title="완료 체크 시 실행 시간에 자동 기록됩니다" aria-label="일정 완료 체크" />
+          <div class="tb-info">
+            <span class="tb-title">${p.important ? '<span class="important-star">★ </span>' : ''}${escapeHtml(p.title)}</span>
+            <span class="tb-time" style="color:${cat.color};display:flex;align-items:center;gap:4px;flex-wrap:wrap;">
+              <span class="tb-time-range-text">${p.startTime}~${p.endTime} · ${dur}분${p.alarm ? ' 🔔' : ''}</span>
+              ${pTag ? `<span class="project-tag-pill">@${escapeHtml(pTag)}</span>` : ''}
+              ${repLabel ? `<span class="repeat-badge">${escapeHtml(repLabel)}</span>` : ''}
+            </span>
+          </div>
+        </div>
+        <div class="tb-actions">
+          <button type="button" class="icon-play-btn plan-run-btn" title="지금 시작 및 시간 기록" aria-label="타이머 시작">▶</button>
+        </div>
+      `;
+
+      const planCheck = block.querySelector('.tb-plan-check');
+      planCheck.addEventListener('click', e => {
+        e.stopPropagation();
+      });
+      planCheck.addEventListener('change', e => {
+        toggleScheduleCompletedWithActualSync(p, slotDate, Boolean(e.target.checked), true);
+        saveState();
+        renderAll();
+      });
+
+      block.querySelector('.plan-run-btn').addEventListener('click', e => {
+        e.stopPropagation();
+        startLiveTrackerWith(p.title, p.categoryId, pTag, { type: 'schedule', id: p.id });
+      });
+
+      block.addEventListener('click', e => {
+        if (
+          e.target.closest('button') ||
+          e.target.closest('.tb-plan-check') ||
+          e.target.closest('.tb-resize-handle') ||
+          isJustDraggedOrResized()
+        ) {
+          return;
+        }
+        openItemModalForEdit('schedule', p);
+      });
+
+      makeItemDraggable(block, 'schedule', p, slotDate);
+      const rangeTextEl = block.querySelector('.tb-time-range-text');
+      attachDurationResizeHandle(block, p, (previewEnd, previewDur) => {
+        if (rangeTextEl) {
+          rangeTextEl.textContent = `${p.startTime}~${previewEnd} · ${previewDur}분${p.alarm ? ' 🔔' : ''}`;
+        }
+        block.style.minHeight = `${calcBlockMinHeightPx(previewDur)}px`;
+      });
+
+      return block;
+    };
+
+    const buildActualBlock = (a, slotDate, isOverlapCompact = false) => {
+      const cat = getCategoryById(a.categoryId);
+      const dur = durationMinutes(a.startTime, a.endTime);
+      const aTag = cleanProjectTag(a.projectTag);
+      const block = document.createElement('div');
+      block.className = `timeline-block ${isOverlapCompact ? 'is-overlap-compact' : ''}`.trim();
+      block.style.background = `${cat.color}22`;
+      block.style.borderLeftColor = cat.color;
+      block.style.minHeight = `${calcBlockMinHeightPx(dur)}px`;
+      block.innerHTML = `
+        <div class="tb-info">
+          <span class="tb-title">${escapeHtml(a.title)}</span>
+          <span class="tb-time" style="color:${cat.color};display:flex;align-items:center;gap:4px;flex-wrap:wrap;">
+            <span class="tb-time-range-text">${a.startTime}~${a.endTime} · ${dur}분</span>
+            ${aTag ? `<span class="project-tag-pill">@${escapeHtml(aTag)}</span>` : ''}
+          </span>
+        </div>
+      `;
+      block.addEventListener('click', e => {
+        if (e.target.closest('.tb-resize-handle') || isJustDraggedOrResized()) return;
+        openItemModalForEdit('actual', a);
+      });
+
+      makeItemDraggable(block, 'actual', a, slotDate);
+      const rangeTextEl = block.querySelector('.tb-time-range-text');
+      attachDurationResizeHandle(block, a, (previewEnd, previewDur) => {
+        if (rangeTextEl) {
+          rangeTextEl.textContent = `${a.startTime}~${previewEnd} · ${previewDur}분`;
+        }
+        block.style.minHeight = `${calcBlockMinHeightPx(previewDur)}px`;
+      });
+
+      return block;
+    };
+
+    const appendClusteredBlocks = (colEl, items, builderFn, slotDate) => {
+      const clusters = partitionOverlappingClusters(items);
+      clusters.forEach(cluster => {
+        if (cluster.length === 1) {
+          colEl.appendChild(builderFn(cluster[0], slotDate, false));
+        } else {
+          const grid = document.createElement('div');
+          grid.className = `dt-overlap-grid ${cluster.length >= 3 ? 'is-multi' : ''}`.trim();
+          cluster.forEach(item => {
+            grid.appendChild(builderFn(item, slotDate, true));
+          });
+          colEl.appendChild(grid);
+        }
+      });
+    };
+
     const prevScrollTop = scrollEl.scrollTop;
     const isDateChanged = lastScrolledTimelineDate !== selectedDate;
 
@@ -2934,20 +3266,31 @@
     const fragment = document.createDocumentFragment();
     let currentHourRowEl = null;
 
-    if (!timelineShowIdleHours && earlyFoldEnd >= 6) {
+    if (!timelineShowIdleHours && earlyFoldEnd >= minHour) {
       fragment.appendChild(
-        createFoldBannerBtn(`이른 아침 빈 시간대 펼치기 · 06:00~${String(earlyFoldEnd + 1).padStart(2, '0')}:00`, true)
+        createFoldBannerBtn(
+          `이른 아침 빈 시간대 펼치기 · ${formatFoldBoundaryLabel(minHour)}~${formatFoldBoundaryLabel(earlyFoldEnd + 1)}`,
+          true
+        )
       );
     } else if (timelineShowIdleHours && hasFoldableIdle) {
       fragment.appendChild(createFoldBannerBtn('빈 새벽 · 심야 시간대 접기', false));
     }
 
     for (let hour = startHour; hour <= endHour; hour++) {
-      const hourStr = `${String(hour).padStart(2, '0')}:00`;
-      const nextHourStr = hour === 23 ? '23:59' : `${String(hour + 1).padStart(2, '0')}:00`;
-      const isCurrentRow = isToday && hour === currentHour;
+      const hourMeta = resolveTimelineHourMeta(selectedDate, hour);
+      const isCurrentRow = hour === activeLiveHourIdx;
       const row = document.createElement('div');
-      row.className = `dt-hour-row ${dashTrackMode !== 'both' ? 'single-col' : ''} ${isCurrentRow ? 'current-hour-row' : ''}`;
+      row.className = [
+        'dt-hour-row',
+        dashTrackMode !== 'both' ? 'single-col' : '',
+        isCurrentRow ? 'current-hour-row' : '',
+        hourMeta.isExtendedNextDay ? 'is-extended-night-row' : '',
+        hourMeta.isMidnightBoundary ? 'dt-midnight-row' : ''
+      ]
+        .filter(Boolean)
+        .join(' ');
+
       if (isCurrentRow) {
         currentHourRowEl = row;
         const nowLine = document.createElement('div');
@@ -2958,15 +3301,17 @@
         row.appendChild(nowLine);
       }
 
-      const plansInHour = plansByHour[hour];
-      const actualsInHour = actualsByHour[hour];
+      const plansInHour = plansByHour[hour] || [];
+      const actualsInHour = actualsByHour[hour] || [];
 
       const timeCol = document.createElement('div');
       timeCol.className = 'dt-hour-label';
       if (isCurrentRow) {
-        timeCol.innerHTML = `<span>${hourStr}</span><span class="dt-now-badge">지금 ${nowTimeStr}</span>`;
+        timeCol.innerHTML = `<span>${escapeHtml(hourMeta.rowLabel)}</span><span class="dt-now-badge">지금 ${nowTimeStr}</span>`;
+      } else if (hourMeta.isExtendedNextDay) {
+        timeCol.innerHTML = `<span class="dt-ext-tag">익일</span><span>${hourMeta.realHourStr}</span>`;
       } else {
-        timeCol.textContent = hourStr;
+        timeCol.textContent = hourMeta.rowLabel;
       }
       row.appendChild(timeCol);
 
@@ -2975,81 +3320,27 @@
         planCol.className = 'dt-slot-cell';
         planCol.dataset.slotType = 'plan';
         planCol.dataset.hour = String(hour);
-        makeSlotDroppable(planCol, { targetType: 'schedule', targetDate: selectedDate, targetHour: hour });
+        makeSlotDroppable(planCol, {
+          targetType: 'schedule',
+          targetDate: hourMeta.slotDate,
+          targetHour: hourMeta.realHour
+        });
 
         if (plansInHour.length === 0) {
-          planCol.innerHTML = `<span class="dt-empty-hint">+ ${hourStr} 추가</span>`;
+          planCol.innerHTML = `<span class="dt-empty-hint">+ ${escapeHtml(hourMeta.shortSlotLabel)} 추가</span>`;
         } else {
-          plansInHour.forEach(p => {
-            const cat = getCategoryById(p.categoryId);
-            const isPlanDone = isItemCompletedOnDate(p, selectedDate);
-            const pTag = cleanProjectTag(p.projectTag);
-            const repLabel = getRepeatLabelKo(p.repeat, p.date);
-            const dur = durationMinutes(p.startTime, p.endTime);
-            const block = document.createElement('div');
-            block.className = `timeline-block ${isPlanDone ? 'is-completed-block' : ''}`;
-            block.style.background = `${cat.color}16`;
-            block.style.borderLeftColor = cat.color;
-            block.style.minHeight = `${calcBlockMinHeightPx(dur)}px`;
-            block.innerHTML = `
-              <div class="tb-left-row">
-                <input type="checkbox" class="tb-plan-check" ${isPlanDone ? 'checked' : ''} title="완료 체크 시 실행 시간에 자동 기록됩니다" aria-label="일정 완료 체크" />
-                <div class="tb-info">
-                  <span class="tb-title">${p.important ? '<span class="important-star">★ </span>' : ''}${escapeHtml(p.title)}</span>
-                  <span class="tb-time" style="color:${cat.color};display:flex;align-items:center;gap:4px;flex-wrap:wrap;">
-                    <span class="tb-time-range-text">${p.startTime}~${p.endTime} · ${dur}분${p.alarm ? ' 🔔' : ''}</span>
-                    ${pTag ? `<span class="project-tag-pill">@${escapeHtml(pTag)}</span>` : ''}
-                    ${repLabel ? `<span class="repeat-badge">${escapeHtml(repLabel)}</span>` : ''}
-                  </span>
-                </div>
-              </div>
-              <div class="tb-actions">
-                <button type="button" class="icon-play-btn plan-run-btn" title="지금 시작 및 시간 기록" aria-label="타이머 시작">▶</button>
-              </div>
-            `;
-
-            const planCheck = block.querySelector('.tb-plan-check');
-            planCheck.addEventListener('click', e => {
-              e.stopPropagation();
-            });
-            planCheck.addEventListener('change', e => {
-              toggleScheduleCompletedWithActualSync(p, selectedDate, Boolean(e.target.checked), true);
-              saveState();
-              renderAll();
-            });
-
-            block.querySelector('.plan-run-btn').addEventListener('click', e => {
-              e.stopPropagation();
-              startLiveTrackerWith(p.title, p.categoryId, pTag, { type: 'schedule', id: p.id });
-            });
-
-            block.addEventListener('click', e => {
-              if (
-                e.target.closest('button') ||
-                e.target.closest('.tb-plan-check') ||
-                e.target.closest('.tb-resize-handle') ||
-                isJustDraggedOrResized()
-              ) {
-                return;
-              }
-              openItemModalForEdit('schedule', p);
-            });
-
-            makeItemDraggable(block, 'schedule', p, selectedDate);
-            const rangeTextEl = block.querySelector('.tb-time-range-text');
-            attachDurationResizeHandle(block, p, (previewEnd, previewDur) => {
-              if (rangeTextEl) {
-                rangeTextEl.textContent = `${p.startTime}~${previewEnd} · ${previewDur}분${p.alarm ? ' 🔔' : ''}`;
-              }
-              block.style.minHeight = `${calcBlockMinHeightPx(previewDur)}px`;
-            });
-
-            planCol.appendChild(block);
-          });
+          appendClusteredBlocks(planCol, plansInHour, buildPlanBlock, hourMeta.slotDate);
         }
         planCol.addEventListener('click', e => {
           if (e.target.closest('.timeline-block') || isJustDraggedOrResized()) return;
-          openItemModalForCreate('schedule', hourStr, nextHourStr);
+          openItemModalForCreate(
+            'schedule',
+            hourMeta.realHourStr,
+            hourMeta.nextRealHourStr,
+            '',
+            'none',
+            hourMeta.slotDate
+          );
         });
         row.appendChild(planCol);
       }
@@ -3059,49 +3350,27 @@
         actualCol.className = 'dt-slot-cell';
         actualCol.dataset.slotType = 'actual';
         actualCol.dataset.hour = String(hour);
-        makeSlotDroppable(actualCol, { targetType: 'actual', targetDate: selectedDate, targetHour: hour });
+        makeSlotDroppable(actualCol, {
+          targetType: 'actual',
+          targetDate: hourMeta.slotDate,
+          targetHour: hourMeta.realHour
+        });
 
         if (actualsInHour.length === 0) {
-          actualCol.innerHTML = `<span class="dt-empty-hint">+ ${hourStr} 기록</span>`;
+          actualCol.innerHTML = `<span class="dt-empty-hint">+ ${escapeHtml(hourMeta.shortSlotLabel)} 기록</span>`;
         } else {
-          actualsInHour.forEach(a => {
-            const cat = getCategoryById(a.categoryId);
-            const dur = durationMinutes(a.startTime, a.endTime);
-            const aTag = cleanProjectTag(a.projectTag);
-            const block = document.createElement('div');
-            block.className = 'timeline-block';
-            block.style.background = `${cat.color}22`;
-            block.style.borderLeftColor = cat.color;
-            block.style.minHeight = `${calcBlockMinHeightPx(dur)}px`;
-            block.innerHTML = `
-              <div class="tb-info">
-                <span class="tb-title">${escapeHtml(a.title)}</span>
-                <span class="tb-time" style="color:${cat.color};display:flex;align-items:center;gap:4px;flex-wrap:wrap;">
-                  <span class="tb-time-range-text">${a.startTime}~${a.endTime} · ${dur}분</span>
-                  ${aTag ? `<span class="project-tag-pill">@${escapeHtml(aTag)}</span>` : ''}
-                </span>
-              </div>
-            `;
-            block.addEventListener('click', e => {
-              if (e.target.closest('.tb-resize-handle') || isJustDraggedOrResized()) return;
-              openItemModalForEdit('actual', a);
-            });
-
-            makeItemDraggable(block, 'actual', a, selectedDate);
-            const rangeTextEl = block.querySelector('.tb-time-range-text');
-            attachDurationResizeHandle(block, a, (previewEnd, previewDur) => {
-              if (rangeTextEl) {
-                rangeTextEl.textContent = `${a.startTime}~${previewEnd} · ${previewDur}분`;
-              }
-              block.style.minHeight = `${calcBlockMinHeightPx(previewDur)}px`;
-            });
-
-            actualCol.appendChild(block);
-          });
+          appendClusteredBlocks(actualCol, actualsInHour, buildActualBlock, hourMeta.slotDate);
         }
         actualCol.addEventListener('click', e => {
           if (e.target.closest('.timeline-block') || isJustDraggedOrResized()) return;
-          openItemModalForCreate('actual', hourStr, nextHourStr);
+          openItemModalForCreate(
+            'actual',
+            hourMeta.realHourStr,
+            hourMeta.nextRealHourStr,
+            '',
+            'none',
+            hourMeta.slotDate
+          );
         });
         row.appendChild(actualCol);
       }
@@ -3109,9 +3378,12 @@
       fragment.appendChild(row);
     }
 
-    if (!timelineShowIdleHours && lateFoldStart <= 23) {
+    if (!timelineShowIdleHours && lateFoldStart <= maxHourIdx) {
       fragment.appendChild(
-        createFoldBannerBtn(`심야 빈 시간대 펼치기 · ${String(lateFoldStart).padStart(2, '0')}:00~24:00`, true)
+        createFoldBannerBtn(
+          `심야 빈 시간대 펼치기 · ${formatFoldBoundaryLabel(lateFoldStart)}~${formatFoldBoundaryLabel(cfgEndHour)}`,
+          true
+        )
       );
     }
 
@@ -3121,7 +3393,7 @@
     if (isDateChanged) {
       lastScrolledTimelineDate = selectedDate;
       requestAnimationFrame(() => {
-        if (isToday && currentHourRowEl) {
+        if (activeLiveHourIdx !== -1 && currentHourRowEl) {
           scrollEl.scrollTop = Math.max(0, currentHourRowEl.offsetTop - 64);
         } else {
           scrollEl.scrollTop = 0;
@@ -3133,10 +3405,17 @@
   }
 
   function refreshLiveTimelineNowLine() {
-    if (selectedDate !== getTodayStr()) return;
+    const todayStr = getTodayStr();
+    const { endHour: cfgEndHour } = getTimelineRangeConfig();
+    const extLimit = Math.max(0, cfgEndHour - 24);
     const now = new Date();
     const h = now.getHours();
-    if (lastRenderedTimelineHour !== -1 && lastRenderedTimelineHour !== h) {
+    const isSameToday = selectedDate === todayStr;
+    const isExtTonight = extLimit > 0 && addDaysStr(selectedDate, 1) === todayStr && h < extLimit;
+    if (!isSameToday && !isExtTonight) return;
+
+    const expectedIdx = isSameToday ? h : 24 + h;
+    if (lastRenderedTimelineHour !== -1 && lastRenderedTimelineHour !== expectedIdx) {
       renderDualTimeline();
       return;
     }
@@ -3463,6 +3742,7 @@
     routinePlayer.overtimeNotified = false;
 
     requestWakeLock();
+    triggerHaptic(45);
     playChimeSound('chime');
     const firstStep = rtn.steps[0];
     speakKorean(`${rtn.name}을 시작합니다. 첫 번째 행동은 ${firstStep.title}, 목표 시간은 ${firstStep.minutes}분입니다.`);
@@ -3481,6 +3761,7 @@
       !routinePlayer.overtimeNotified
     ) {
       routinePlayer.overtimeNotified = true;
+      triggerHaptic([120, 70, 120]);
       playChimeSound('alarm');
       const rtn = state.routines.find(r => r.id === routinePlayer.activeRoutineId);
       const step = rtn?.steps?.[routinePlayer.stepIndex];
@@ -3512,6 +3793,7 @@
       routinePlayer.stepStartTimestamp = now;
       routinePlayer.overtimeNotified = false;
 
+      triggerHaptic([35, 45, 35]);
       playChimeSound('chime');
       speakKorean(
         `${skipped ? '건너뛰었습니다.' : '잘하셨어요!'} 다음 행동은 ${nextStep.title}, ${nextStep.minutes}분입니다.`
@@ -3544,6 +3826,7 @@
     routinePlayer.stepStartTimestamp = now;
     routinePlayer.overtimeNotified = false;
 
+    triggerHaptic(30);
     playChimeSound('chime');
     speakKorean(`이전 단계인 ${prevStep.title}로 돌아갑니다.`);
     updateRoutinePlayerUI();
@@ -3557,6 +3840,9 @@
     routinePlayer.running = false;
     routinePlayer.paused = false;
     releaseWakeLock();
+    if (routineFocusMode) {
+      closeModalWindow('routineFocusMode');
+    }
 
     const todayStr = getTodayStr();
     if (!Array.isArray(rtn.completedDates)) rtn.completedDates = [];
@@ -3584,6 +3870,7 @@
       categoryId: rtn.categoryId
     });
 
+    triggerHaptic([60, 50, 60, 50, 140]);
     playChimeSound('fanfare');
     speakKorean(`축하합니다! ${rtn.name}을 모두 완주하셨습니다. 실제 사용 시간 타임트래커에 자동 기록되었습니다.`);
     showToast(`🎉 '${rtn.name}' 완주! 타임트래커에 ${actualMins}분 자동 기록되었습니다.`);
@@ -3602,6 +3889,9 @@
     routinePlayer.activeRoutineId = null;
     if (prevId) selectedPreviewRoutineId = prevId;
     releaseWakeLock();
+    if (routineFocusMode) {
+      closeModalWindow('routineFocusMode');
+    }
     renderRoutinePlayerTab();
     updateTopBannerUI();
     showToast('루틴 실행을 종료했습니다.');
@@ -3729,54 +4019,81 @@
     }
   }
 
-  // 상단 플로팅 타이머 배너 동기화
+  // 상단 플로팅 타이머 배너 및 미니 알약 모드 동기화
   function updateTopBannerUI() {
     const banner = document.getElementById('activeTimerBanner');
+    const pill = document.getElementById('minimizedTimerPill');
+    const minClockEl = document.getElementById('minTimerClock');
+    const minTitleEl = document.getElementById('minTimerTitle');
     const typeEl = document.getElementById('bannerTimerType');
     const titleEl = document.getElementById('bannerTimerTitle');
     const clockEl = document.getElementById('bannerTimerClock');
     const pauseBtn = document.getElementById('bannerPauseBtn');
     const completeBtn = document.getElementById('bannerCompleteBtn');
 
+    if (!routinePlayer.running && !liveTracker.running) {
+      timerBannerMinimized = false;
+      banner?.classList.add('hidden');
+      pill?.classList.add('hidden');
+      return;
+    }
+
+    if (routineFocusMode) {
+      banner?.classList.add('hidden');
+      pill?.classList.add('hidden');
+      return;
+    }
+
+    let clockStr = '00:00';
+    let pillLabel = '진행 중';
+
     if (routinePlayer.running) {
       const rtn = state.routines.find(r => r.id === routinePlayer.activeRoutineId);
       const step = rtn?.steps?.[routinePlayer.stepIndex];
       const remain = routinePlayer.stepTargetSeconds - routinePlayer.stepElapsedSeconds;
-      banner.classList.remove('hidden');
-      typeEl.textContent = routinePlayer.paused ? '루틴 일시정지' : '루틴 실행 중';
-      titleEl.textContent = `${rtn ? rtn.name : ''} · ${step ? step.title : ''}`;
+      if (typeEl) typeEl.textContent = routinePlayer.paused ? '루틴 일시정지' : '루틴 실행 중';
+      const fullTitle = `${rtn ? rtn.name : ''} · ${step ? step.title : ''}`;
+      if (titleEl) titleEl.textContent = fullTitle;
+      pillLabel = step ? step.title : rtn ? rtn.name : '루틴';
       if (remain >= 0) {
         const mm = String(Math.floor(remain / 60)).padStart(2, '0');
         const ss = String(remain % 60).padStart(2, '0');
-        clockEl.textContent = `${mm}:${ss}`;
+        clockStr = `${mm}:${ss}`;
       } else {
         const over = Math.abs(remain);
         const mm = String(Math.floor(over / 60)).padStart(2, '0');
         const ss = String(over % 60).padStart(2, '0');
-        clockEl.textContent = `+${mm}:${ss}`;
+        clockStr = `+${mm}:${ss}`;
       }
+      if (clockEl) clockEl.textContent = clockStr;
       if (pauseBtn) {
         pauseBtn.classList.remove('hidden');
         pauseBtn.textContent = routinePlayer.paused ? '다시 시작' : '일시정지';
       }
       if (completeBtn) completeBtn.textContent = '단계 완료';
-      return;
-    }
-
-    if (liveTracker.running) {
+    } else if (liveTracker.running) {
       const s = liveTracker.elapsedSeconds;
       const mm = String(Math.floor(s / 60)).padStart(2, '0');
       const ss = String(s % 60).padStart(2, '0');
-      banner.classList.remove('hidden');
-      typeEl.textContent = '타임트래커 측정 중';
-      titleEl.textContent = liveTracker.title;
-      clockEl.textContent = `${mm}:${ss}`;
+      clockStr = `${mm}:${ss}`;
+      pillLabel = liveTracker.title || '측정 중';
+      if (typeEl) typeEl.textContent = '타임트래커 측정 중';
+      if (titleEl) titleEl.textContent = liveTracker.title;
+      if (clockEl) clockEl.textContent = clockStr;
       if (pauseBtn) pauseBtn.classList.add('hidden');
       if (completeBtn) completeBtn.textContent = '측정 완료';
-      return;
     }
 
-    banner.classList.add('hidden');
+    if (minClockEl) minClockEl.textContent = clockStr;
+    if (minTitleEl) minTitleEl.textContent = pillLabel;
+
+    if (timerBannerMinimized) {
+      banner?.classList.add('hidden');
+      pill?.classList.remove('hidden');
+    } else {
+      banner?.classList.remove('hidden');
+      pill?.classList.add('hidden');
+    }
   }
 
   // -------------------- 탭 3: 주간 · 월간 전체 조망 및 공통 주별/월별 렌더러 --------------------
@@ -3838,6 +4155,7 @@
       weekView.classList.add('hidden');
       monthToolbar?.classList.remove('hidden');
       weekToolbar?.classList.add('hidden');
+      syncTimelineRangeControlsUI();
 
       titleEl.textContent = `${year}년 ${month + 1}월`;
       const monthGrid = document.getElementById('monthCalendarGrid');
@@ -3855,8 +4173,11 @@
       const boardGrid = document.getElementById('weekMatrixGrid');
       const timetableWrap = document.getElementById('weekTimetableWrap');
       const weekResizeBtn = document.getElementById('calWeekResizeModeBtn');
+      const weekRangeBtn = document.getElementById('calWeekTimeRangeBtn');
       const effectiveWeekLayout = isMobileCalendarViewport() ? 'board' : calWeekLayout;
       weekResizeBtn?.classList.toggle('hidden', effectiveWeekLayout !== 'timetable');
+      weekRangeBtn?.classList.toggle('hidden', effectiveWeekLayout !== 'timetable');
+      syncTimelineRangeControlsUI();
 
       const formatWeekSummaryLine = wStats => {
         if (!wStats) return '';
@@ -4886,7 +5207,7 @@
     return { totalPlanMins, totalActualMins, totalTodos };
   }
 
-  // 주별 시간대별 표 (06:00~23:00 × 월~일 7일 · 요일별 계획/실행 2열 분리) 렌더러
+  // 주별 시간대별 표 (사용자 지정 활동 시간대 × 월~일 7일 · 요일별 계획/실행 2열 분리) 렌더러
   function renderWeeklyTimetableInto(container, weekInfo, mode = 'both') {
     if (!container) return { totalPlanMins: 0, totalActualMins: 0, totalTodos: 0 };
     container.innerHTML = '';
@@ -4895,6 +5216,9 @@
     const nowHour = new Date().getHours();
     const showPlan = mode === 'both' || mode === 'plan';
     const showActual = mode === 'both' || mode === 'actual';
+    const { startHour: cfgStartHour, endHour: cfgEndHour } = getTimelineRangeConfig();
+    const maxHourIdx = cfgEndHour - 1;
+    const totalBucketCount = Math.max(24, cfgEndHour);
 
     let totalPlanMins = 0;
     let totalActualMins = 0;
@@ -4908,10 +5232,11 @@
     headRow.className = 'wk-tt-row wk-tt-header-row';
     headRow.innerHTML = `<div class="wk-tt-time-cell">시간</div>`;
 
-    let minWeekHour = 6;
+    let minWeekHour = cfgStartHour;
     const plansByDayHour = new Map();
     const actualsByDayHour = new Map();
     const hasTodayInWeek = weekInfo.days.some(d => d.dateStr === todayStr);
+    const hasYesterdayOfTodayInWeek = weekInfo.days.some(d => addDaysStr(d.dateStr, 1) === todayStr);
 
     weekInfo.days.forEach(dayObj => {
       const dStr = dayObj.dateStr;
@@ -4925,20 +5250,42 @@
         t => matchesSelectedProjectTag(t) && doesItemOccurOnDate(t, dStr, true)
       );
 
-      const pBuckets = Array.from({ length: 24 }, () => []);
+      const pBuckets = Array.from({ length: totalBucketCount }, () => []);
       dayPlans.forEach(s => {
         const h = Math.max(0, Math.min(23, Math.floor(timeToMinutes(s.startTime) / 60)));
         pBuckets[h].push(s);
         if (showPlan && h < minWeekHour) minWeekHour = h;
       });
-      plansByDayHour.set(dStr, pBuckets);
 
-      const aBuckets = Array.from({ length: 24 }, () => []);
+      const aBuckets = Array.from({ length: totalBucketCount }, () => []);
       dayActuals.forEach(a => {
         const h = Math.max(0, Math.min(23, Math.floor(timeToMinutes(a.startTime) / 60)));
         aBuckets[h].push(a);
         if (showActual && h < minWeekHour) minWeekHour = h;
       });
+
+      if (cfgEndHour > 24) {
+        const extLimitHour = cfgEndHour - 24;
+        const nextDayStr = addDaysStr(dStr, 1);
+        state.schedules
+          .filter(s => matchesSelectedProjectTag(s) && doesItemOccurOnDate(s, nextDayStr, false))
+          .forEach(s => {
+            const h = Math.max(0, Math.min(23, Math.floor(timeToMinutes(s.startTime) / 60)));
+            if (h < extLimitHour) {
+              pBuckets[24 + h].push(s);
+            }
+          });
+        state.actualLogs
+          .filter(a => matchesSelectedProjectTag(a) && a.date === nextDayStr)
+          .forEach(a => {
+            const h = Math.max(0, Math.min(23, Math.floor(timeToMinutes(a.startTime) / 60)));
+            if (h < extLimitHour) {
+              aBuckets[24 + h].push(a);
+            }
+          });
+      }
+
+      plansByDayHour.set(dStr, pBuckets);
       actualsByDayHour.set(dStr, aBuckets);
 
       const pMins = dayPlans.reduce((s, x) => s + durationMinutes(x.startTime, x.endTime), 0);
@@ -5048,21 +5395,38 @@
       return chip;
     };
 
-    // 2. 시간 행 (조기 일정이 있으면 06시 이전부터 자동 표시)
+    // 2. 시간 행 (사용자 지정 활동 시간대 및 조기 일정 자동 포함 · 익일 심야 확장 지원)
     const rowsFrag = document.createDocumentFragment();
-    for (let hour = minWeekHour; hour <= 23; hour++) {
-      const hourStr = `${String(hour).padStart(2, '0')}:00`;
-      const nextHourStr = hour === 23 ? '23:59' : `${String(hour + 1).padStart(2, '0')}:00`;
+    for (let hour = minWeekHour; hour <= maxHourIdx; hour++) {
+      const isExtHour = hour >= 24;
+      const realH = isExtHour ? hour - 24 : hour;
+      const realHourStr = `${String(realH).padStart(2, '0')}:00`;
+      const isCurrentRow = isExtHour
+        ? hasYesterdayOfTodayInWeek && realH === nowHour
+        : hasTodayInWeek && hour === nowHour;
+
       const row = document.createElement('div');
-      row.className = `wk-tt-row ${hasTodayInWeek && hour === nowHour ? 'is-current-hour' : ''}`;
+      row.className = [
+        'wk-tt-row',
+        isCurrentRow ? 'is-current-hour' : '',
+        hour === 24 ? 'dt-midnight-row' : '',
+        isExtHour ? 'is-extended-night-row' : ''
+      ]
+        .filter(Boolean)
+        .join(' ');
 
       const timeCell = document.createElement('div');
       timeCell.className = 'wk-tt-time-cell';
-      timeCell.textContent = hourStr;
+      if (isExtHour) {
+        timeCell.innerHTML = `<span class="dt-ext-tag">익일</span><span>${realHourStr}</span>`;
+      } else {
+        timeCell.textContent = realHourStr;
+      }
       row.appendChild(timeCell);
 
       weekInfo.days.forEach(dayObj => {
         const dStr = dayObj.dateStr;
+        const hourMeta = resolveTimelineHourMeta(dStr, hour);
         const plansInHour = plansByDayHour.get(dStr)?.[hour] || [];
         const actualsInHour = actualsByDayHour.get(dStr)?.[hour] || [];
 
@@ -5072,32 +5436,46 @@
 
           const planSlot = document.createElement('div');
           planSlot.className = 'wk-tt-subslot plan-slot';
-          planSlot.title = `${dayObj.monthDayLabel} ${hourStr} 계획 일정 추가`;
+          planSlot.title = `${dayObj.monthDayLabel} ${hourMeta.shortSlotLabel} 계획 일정 추가`;
           makeSlotDroppable(planSlot, {
             targetType: 'schedule',
-            targetDate: dStr,
-            targetHour: hour
+            targetDate: hourMeta.slotDate,
+            targetHour: hourMeta.realHour
           });
-          plansInHour.forEach(p => planSlot.appendChild(buildPlanChip(p, dStr, true)));
+          plansInHour.forEach(p => planSlot.appendChild(buildPlanChip(p, hourMeta.slotDate, true)));
           planSlot.addEventListener('click', () => {
             if (isJustDraggedOrResized()) return;
             selectedDate = dStr;
-            openItemModalForCreate('schedule', hourStr, nextHourStr);
+            openItemModalForCreate(
+              'schedule',
+              hourMeta.realHourStr,
+              hourMeta.nextRealHourStr,
+              '',
+              'none',
+              hourMeta.slotDate
+            );
           });
 
           const actualSlot = document.createElement('div');
           actualSlot.className = 'wk-tt-subslot actual-slot';
-          actualSlot.title = `${dayObj.monthDayLabel} ${hourStr} 실행 기록 추가`;
+          actualSlot.title = `${dayObj.monthDayLabel} ${hourMeta.shortSlotLabel} 실행 기록 추가`;
           makeSlotDroppable(actualSlot, {
             targetType: 'actual',
-            targetDate: dStr,
-            targetHour: hour
+            targetDate: hourMeta.slotDate,
+            targetHour: hourMeta.realHour
           });
-          actualsInHour.forEach(a => actualSlot.appendChild(buildActualChip(a, dStr, true)));
+          actualsInHour.forEach(a => actualSlot.appendChild(buildActualChip(a, hourMeta.slotDate, true)));
           actualSlot.addEventListener('click', () => {
             if (isJustDraggedOrResized()) return;
             selectedDate = dStr;
-            openItemModalForCreate('actual', hourStr, nextHourStr);
+            openItemModalForCreate(
+              'actual',
+              hourMeta.realHourStr,
+              hourMeta.nextRealHourStr,
+              '',
+              'none',
+              hourMeta.slotDate
+            );
           });
 
           dayPair.appendChild(planSlot);
@@ -5108,19 +5486,26 @@
           slot.className = `wk-tt-slot ${dStr === todayStr ? 'is-today-col' : ''}`;
           makeSlotDroppable(slot, {
             targetType: mode === 'actual' ? 'actual' : 'schedule',
-            targetDate: dStr,
-            targetHour: hour
+            targetDate: hourMeta.slotDate,
+            targetHour: hourMeta.realHour
           });
           if (showPlan) {
-            plansInHour.forEach(p => slot.appendChild(buildPlanChip(p, dStr, false)));
+            plansInHour.forEach(p => slot.appendChild(buildPlanChip(p, hourMeta.slotDate, false)));
           }
           if (showActual) {
-            actualsInHour.forEach(a => slot.appendChild(buildActualChip(a, dStr, false)));
+            actualsInHour.forEach(a => slot.appendChild(buildActualChip(a, hourMeta.slotDate, false)));
           }
           slot.addEventListener('click', () => {
             if (isJustDraggedOrResized()) return;
             selectedDate = dStr;
-            openItemModalForCreate(mode === 'actual' ? 'actual' : 'schedule', hourStr, nextHourStr);
+            openItemModalForCreate(
+              mode === 'actual' ? 'actual' : 'schedule',
+              hourMeta.realHourStr,
+              hourMeta.nextRealHourStr,
+              '',
+              'none',
+              hourMeta.slotDate
+            );
           });
           row.appendChild(slot);
         }
@@ -6516,13 +6901,145 @@
   }
 
   // -------------------- 모달 열기·닫기·편집 핸들러 --------------------
-  function openItemModalForCreate(type, startTime = '09:00', endTime = '10:00', defaultTag = '', defaultRepeat = 'none') {
+  function syncItemModalDurationPresetsUI() {
+    const startVal = document.getElementById('itemModalStartTime')?.value || '09:00';
+    const endVal = document.getElementById('itemModalEndTime')?.value || '10:00';
+    const dur = durationMinutes(startVal, endVal);
+    document.querySelectorAll('#itemModalDurPresets .dur-preset-btn').forEach(btn => {
+      btn.classList.toggle('active', Number(btn.dataset.dur) === dur);
+    });
+  }
+
+  function renderItemModalFreeSlotChips() {
+    const listEl = document.getElementById('itemModalFreeSlotsList');
+    const wrapEl = document.getElementById('itemModalFreeSlotsWrap');
+    if (!listEl || !wrapEl) return;
+
+    const type = document.getElementById('itemModalType')?.value || 'schedule';
+    if (type === 'todo') {
+      wrapEl.classList.add('hidden');
+      return;
+    }
+    wrapEl.classList.remove('hidden');
+
+    const targetDate = document.getElementById('itemModalDate')?.value || selectedDate;
+    const editingId = document.getElementById('itemModalId')?.value || '';
+    const startVal = document.getElementById('itemModalStartTime')?.value || '09:00';
+    const endVal = document.getElementById('itemModalEndTime')?.value || '10:00';
+    const dur = Math.max(15, Math.min(240, durationMinutes(startVal, endVal) || 60));
+
+    const { startHour: cfgStartHour, endHour: cfgEndHour } = getTimelineRangeConfig();
+    const dayStartMins = Math.max(0, cfgStartHour * 60);
+    const dayEndMins = Math.min(23 * 60 + 59, Math.min(24, cfgEndHour) * 60);
+
+    const rawOccupied =
+      type === 'actual'
+        ? state.actualLogs
+            .filter(a => a.date === targetDate && a.id !== editingId)
+            .map(a => ({ start: timeToMinutes(a.startTime), end: timeToMinutes(a.endTime) }))
+        : state.schedules
+            .filter(s => s.id !== editingId && doesItemOccurOnDate(s, targetDate, false))
+            .map(s => ({ start: timeToMinutes(s.startTime), end: timeToMinutes(s.endTime) }));
+
+    rawOccupied.sort((a, b) => a.start - b.start);
+    const merged = [];
+    rawOccupied.forEach(iv => {
+      const s = Math.max(0, iv.start);
+      const e = Math.max(s + 15, iv.end);
+      if (merged.length === 0 || s > merged[merged.length - 1].end) {
+        merged.push({ start: s, end: e });
+      } else {
+        merged[merged.length - 1].end = Math.max(merged[merged.length - 1].end, e);
+      }
+    });
+
+    const collectSlotsFrom = (minStartMins, maxCount, existingKeys) => {
+      const found = [];
+      let cursor = Math.max(dayStartMins, minStartMins);
+      cursor = Math.ceil(cursor / 30) * 30;
+      let guard = 0;
+
+      while (cursor + dur <= dayEndMins && found.length < maxCount && guard < 96) {
+        guard += 1;
+        let conflictEnd = -1;
+        for (let i = 0; i < merged.length; i++) {
+          const occ = merged[i];
+          if (cursor < occ.end && cursor + dur > occ.start) {
+            conflictEnd = occ.end;
+            break;
+          }
+        }
+        if (conflictEnd !== -1) {
+          cursor = Math.ceil(conflictEnd / 15) * 15;
+          continue;
+        }
+        const stStr = minutesToTime(cursor);
+        const etVal = cursor + dur >= 24 * 60 ? 23 * 60 + 59 : cursor + dur;
+        const etStr = minutesToTime(etVal);
+        const key = `${stStr}-${etStr}`;
+        if (!existingKeys.has(key)) {
+          existingKeys.add(key);
+          found.push({ startTime: stStr, endTime: etStr });
+        }
+        cursor = Math.ceil((cursor + Math.max(60, dur)) / 30) * 30;
+      }
+      return found;
+    };
+
+    const seenKeys = new Set();
+    const isToday = targetDate === getTodayStr();
+    const preferredStart =
+      isToday && type === 'schedule'
+        ? Math.max(dayStartMins, Math.ceil(timeToMinutes(getNowTimeStr()) / 30) * 30)
+        : Math.max(dayStartMins, 9 * 60);
+
+    let slots = collectSlotsFrom(preferredStart, 5, seenKeys);
+    if (slots.length < 5 && preferredStart > dayStartMins) {
+      const earlier = collectSlotsFrom(dayStartMins, 5 - slots.length, seenKeys);
+      slots = [...slots, ...earlier].sort((a, b) => a.startTime.localeCompare(b.startTime)).slice(0, 5);
+    }
+
+    listEl.innerHTML = '';
+    if (slots.length === 0) {
+      const empty = document.createElement('span');
+      empty.className = 'free-slot-empty';
+      empty.textContent = '남은 빈 시간대가 없습니다';
+      listEl.appendChild(empty);
+      return;
+    }
+
+    slots.forEach(slot => {
+      const chip = document.createElement('button');
+      chip.type = 'button';
+      const isSelected = slot.startTime === startVal && slot.endTime === endVal;
+      chip.className = `free-slot-chip ${isSelected ? 'active' : ''}`;
+      chip.textContent = `${slot.startTime}~${slot.endTime}`;
+      chip.addEventListener('click', () => {
+        const startInput = document.getElementById('itemModalStartTime');
+        const endInput = document.getElementById('itemModalEndTime');
+        if (startInput) startInput.value = slot.startTime;
+        if (endInput) endInput.value = slot.endTime;
+        syncItemModalDurationPresetsUI();
+        renderItemModalFreeSlotChips();
+      });
+      listEl.appendChild(chip);
+    });
+  }
+
+  function openItemModalForCreate(
+    type,
+    startTime = '09:00',
+    endTime = '10:00',
+    defaultTag = '',
+    defaultRepeat = 'none',
+    overrideDate = ''
+  ) {
     document.getElementById('itemModalHeading').textContent =
       type === 'actual' ? '실제 사용 시간 기록 추가' : type === 'todo' ? '할 일 추가' : '계획 일정 추가';
     document.getElementById('itemModalId').value = '';
     document.getElementById('itemModalType').value = type;
     document.getElementById('itemModalTitle').value = '';
-    document.getElementById('itemModalDate').value = selectedDate;
+    document.getElementById('itemModalDate').value = overrideDate || selectedDate;
     document.getElementById('itemModalStartTime').value = startTime;
     document.getElementById('itemModalEndTime').value = endTime;
     const tagInput = document.getElementById('itemModalProjectTag');
@@ -6579,6 +7096,10 @@
     if (timeRow) {
       timeRow.classList.toggle('hidden', type === 'todo');
     }
+    const quickAssist = document.getElementById('itemModalQuickTimeAssist');
+    if (quickAssist) {
+      quickAssist.classList.toggle('hidden', type === 'todo');
+    }
     const shiftRow = document.getElementById('itemModalShiftRow');
     if (shiftRow) {
       shiftRow.classList.toggle('hidden', type === 'todo');
@@ -6594,6 +7115,10 @@
     const alarmLeadWrap = document.getElementById('itemModalAlarmLeadWrap');
     if (alarmLeadWrap) {
       alarmLeadWrap.classList.toggle('hidden', type !== 'schedule');
+    }
+    if (type !== 'todo') {
+      syncItemModalDurationPresetsUI();
+      renderItemModalFreeSlotChips();
     }
   }
 
@@ -6932,11 +7457,22 @@
         ? rawState.aiReportsByPeriod
         : {};
 
+    const mergedSettings = { ...fallback.settings, ...(rawState.settings || {}) };
+    const rawStartH = Number(mergedSettings.timelineStartHour);
+    const rawEndH = Number(mergedSettings.timelineEndHour);
+    mergedSettings.timelineStartHour = Number.isFinite(rawStartH)
+      ? Math.max(0, Math.min(10, Math.round(rawStartH)))
+      : 6;
+    mergedSettings.timelineEndHour = Number.isFinite(rawEndH)
+      ? Math.max(20, Math.min(28, Math.round(rawEndH)))
+      : 24;
+    mergedSettings.autoFoldIdleHours = mergedSettings.autoFoldIdleHours !== false;
+
     return {
       ...fallback,
       ...rawState,
       updatedAt: rawState.updatedAt || '',
-      settings: { ...fallback.settings, ...(rawState.settings || {}) },
+      settings: mergedSettings,
       reviewNotes: { ...fallback.reviewNotes, ...(rawState.reviewNotes || {}) },
       timeBudgets: { ...fallback.timeBudgets, ...(rawState.timeBudgets || {}) },
       aiReportsByPeriod: safeAiReports,
@@ -7941,6 +8477,9 @@
   // -------------------- 탭 전환 및 유틸리티 --------------------
   function switchTab(tabName) {
     if (!tabName) return;
+    if (routineFocusMode && tabName !== 'routines') {
+      closeModalWindow('routineFocusMode');
+    }
     const changed = currentActiveTab !== tabName;
     currentActiveTab = tabName;
     document.querySelectorAll('.nav-tab').forEach(btn => {
@@ -7983,8 +8522,15 @@
       });
     });
 
-    // 통합 검색 모달 & 다크 모드 토글
+    // 통합 검색 모달 · 단축키 모달 · 다크 모드 토글
     document.getElementById('openSearchModalBtn')?.addEventListener('click', openGlobalSearchModal);
+    document.getElementById('openShortcutModalBtn')?.addEventListener('click', () => {
+      openModalWindow('shortcutModal');
+    });
+    document.getElementById('syncOpenShortcutBtn')?.addEventListener('click', () => {
+      closeModalWindow('syncModal');
+      openModalWindow('shortcutModal');
+    });
     document.getElementById('globalSearchInput')?.addEventListener('input', renderGlobalSearchResults);
     document.querySelectorAll('#globalSearchTypeTabs [data-stype]').forEach(btn => {
       btn.addEventListener('click', () => {
@@ -8143,6 +8689,57 @@
       });
     });
 
+    // 활동 시간대 조절 바 열기·닫기 및 시작/종료 시각 · 프리셋 · 자동 접기 제어
+    document.querySelectorAll('.js-toggle-time-range').forEach(btn => {
+      btn.addEventListener('click', () => {
+        timelineRangeDrawerOpen = !timelineRangeDrawerOpen;
+        syncTimelineRangeControlsUI();
+      });
+    });
+
+    document.querySelectorAll('.js-time-start-select').forEach(sel => {
+      sel.addEventListener('change', () => {
+        state.settings.timelineStartHour = Math.max(0, Math.min(10, Number(sel.value) || 0));
+        timelineShowIdleHours = true;
+        saveState();
+        renderAll();
+      });
+    });
+
+    document.querySelectorAll('.js-time-end-select').forEach(sel => {
+      sel.addEventListener('change', () => {
+        state.settings.timelineEndHour = Math.max(20, Math.min(28, Number(sel.value) || 24));
+        timelineShowIdleHours = true;
+        saveState();
+        renderAll();
+      });
+    });
+
+    document.querySelectorAll('.time-range-preset-btn').forEach(btn => {
+      btn.addEventListener('click', () => {
+        const nextStart = Math.max(0, Math.min(10, Number(btn.dataset.start) || 6));
+        const nextEnd = Math.max(20, Math.min(28, Number(btn.dataset.end) || 24));
+        state.settings.timelineStartHour = nextStart;
+        state.settings.timelineEndHour = nextEnd;
+        if (btn.dataset.fold !== undefined) {
+          state.settings.autoFoldIdleHours = btn.dataset.fold === 'true';
+        }
+        timelineShowIdleHours = false;
+        saveState();
+        renderAll();
+        showToast(`활동 시간대가 ${formatTimelineRangeShortLabel(nextStart, nextEnd)} 범위로 설정되었습니다.`);
+      });
+    });
+
+    document.querySelectorAll('.js-auto-fold-check').forEach(chk => {
+      chk.addEventListener('change', () => {
+        state.settings.autoFoldIdleHours = Boolean(chk.checked);
+        timelineShowIdleHours = false;
+        saveState();
+        renderAll();
+      });
+    });
+
     // 1줄 실시간 타이머 바 열기·닫기
     document.getElementById('toggleQuickTimerBtn')?.addEventListener('click', () => {
       const bar = document.getElementById('quickTimerBar');
@@ -8189,7 +8786,35 @@
       toggleItemModalTimeVisibility(e.target.value);
     });
 
-    // 항목 모달 내 빠른 시간·날짜 이동 버튼
+    // 항목 모달 내 소요 시간 프리셋 · 빈 시간대 추천 · 빠른 이동 버튼
+    document.querySelectorAll('#itemModalDurPresets .dur-preset-btn').forEach(btn => {
+      btn.addEventListener('click', () => {
+        const durMins = Math.max(15, Number(btn.dataset.dur) || 60);
+        const startEl = document.getElementById('itemModalStartTime');
+        const endEl = document.getElementById('itemModalEndTime');
+        if (!startEl || !endEl) return;
+        const curStart = timeToMinutes(startEl.value || '09:00');
+        const nextEnd = Math.min(23 * 60 + 59, curStart + durMins);
+        endEl.value = minutesToTime(nextEnd);
+        syncItemModalDurationPresetsUI();
+        renderItemModalFreeSlotChips();
+      });
+    });
+
+    ['change', 'input'].forEach(evtName => {
+      document.getElementById('itemModalStartTime')?.addEventListener(evtName, () => {
+        syncItemModalDurationPresetsUI();
+        renderItemModalFreeSlotChips();
+      });
+      document.getElementById('itemModalEndTime')?.addEventListener(evtName, () => {
+        syncItemModalDurationPresetsUI();
+        renderItemModalFreeSlotChips();
+      });
+      document.getElementById('itemModalDate')?.addEventListener(evtName, () => {
+        renderItemModalFreeSlotChips();
+      });
+    });
+
     const shiftModalTimeInputs = deltaMinutes => {
       const startEl = document.getElementById('itemModalStartTime');
       const endEl = document.getElementById('itemModalEndTime');
@@ -8201,6 +8826,8 @@
       const nextEnd = Math.min(23 * 60 + 59, nextStart + dur);
       startEl.value = minutesToTime(nextStart);
       endEl.value = minutesToTime(nextEnd);
+      syncItemModalDurationPresetsUI();
+      renderItemModalFreeSlotChips();
     };
 
     document.getElementById('shiftTimeBack30Btn')?.addEventListener('click', () => shiftModalTimeInputs(-30));
@@ -8210,6 +8837,7 @@
       const dateEl = document.getElementById('itemModalDate');
       if (!dateEl) return;
       dateEl.value = addDaysStr(dateEl.value || selectedDate, 1);
+      renderItemModalFreeSlotChips();
       showToast(`기준 날짜가 ${dateEl.value}로 변경되었습니다.`);
     });
 
@@ -8338,7 +8966,14 @@
     });
     document.getElementById('stopLiveTrackerBtn').addEventListener('click', stopLiveTrackerAndRecord);
 
-    // 루티너리 플레이어 컨트롤 버튼
+    // 루티너리 플레이어 컨트롤 및 전체화면 집중 모드 버튼
+    document.getElementById('playerFocusModeBtn')?.addEventListener('click', () => {
+      if (routineFocusMode) {
+        closeModalWindow('routineFocusMode');
+      } else {
+        openModalWindow('routineFocusMode');
+      }
+    });
     document.getElementById('playerPrevStepBtn')?.addEventListener('click', goToPreviousRoutineStep);
     document.getElementById('playerCompleteStepBtn').addEventListener('click', () => {
       if (!routinePlayer.running) {
@@ -8364,7 +8999,7 @@
     });
     document.getElementById('playerStopRoutineBtn').addEventListener('click', stopRoutinePlayerEarly);
 
-    // 상단 플로팅 배너 버튼
+    // 상단 플로팅 배너 & 미니 알약 접기/펼치기 버튼
     document.getElementById('bannerCompleteBtn').addEventListener('click', () => {
       if (routinePlayer.running) completeCurrentRoutineStep(false);
       else if (liveTracker.running) stopLiveTrackerAndRecord();
@@ -8377,6 +9012,14 @@
     document.getElementById('bannerGoPlayerBtn').addEventListener('click', () => {
       if (routinePlayer.running) switchTab('routines');
       else switchTab('dashboard');
+    });
+    document.getElementById('bannerMinimizeBtn')?.addEventListener('click', () => {
+      timerBannerMinimized = true;
+      updateTopBannerUI();
+    });
+    document.getElementById('minimizedTimerPill')?.addEventListener('click', () => {
+      timerBannerMinimized = false;
+      updateTopBannerUI();
     });
 
     // 루틴 추가 및 AI 루틴 생성
@@ -8926,7 +9569,15 @@
     });
 
     // 공통 모달 닫기 버튼 + 배경 클릭 및 단축키 지원
-    const closableModalIds = ['itemModal', 'routineModal', 'categoryModal', 'syncModal', 'searchModal', 'dayDetailModal'];
+    const closableModalIds = [
+      'itemModal',
+      'routineModal',
+      'categoryModal',
+      'syncModal',
+      'searchModal',
+      'dayDetailModal',
+      'shortcutModal'
+    ];
 
     document.querySelectorAll('[data-close]').forEach(btn => {
       btn.addEventListener('click', () => {
@@ -9121,6 +9772,8 @@
     });
 
     document.addEventListener('keydown', e => {
+      if (e.isComposing) return;
+
       if (e.key === 'Escape') {
         if (closeTopModalWindow()) {
           e.preventDefault();
@@ -9134,17 +9787,68 @@
         return;
       }
 
+      const activeTag = (document.activeElement?.tagName || '').toUpperCase();
+      const isTyping =
+        activeTag === 'INPUT' ||
+        activeTag === 'TEXTAREA' ||
+        activeTag === 'SELECT' ||
+        Boolean(document.activeElement?.isContentEditable);
+
       if ((e.ctrlKey || e.metaKey) && !e.shiftKey && e.key.toLowerCase() === 'z') {
-        const activeTag = (document.activeElement?.tagName || '').toUpperCase();
-        const isTyping =
-          activeTag === 'INPUT' ||
-          activeTag === 'TEXTAREA' ||
-          activeTag === 'SELECT' ||
-          document.activeElement?.isContentEditable;
         if (!isTyping && undoStack.length > 0) {
           e.preventDefault();
           performUndo();
         }
+        return;
+      }
+
+      if (isTyping || e.ctrlKey || e.metaKey || e.altKey) return;
+
+      if (e.key === '?' || (e.shiftKey && e.code === 'Slash')) {
+        e.preventDefault();
+        const scModal = document.getElementById('shortcutModal');
+        if (scModal && !scModal.classList.contains('hidden')) {
+          closeModalWindow('shortcutModal');
+        } else {
+          openModalWindow('shortcutModal');
+        }
+        return;
+      }
+
+      const hasBlockingModal = overlayHistoryStack.some(id => id !== 'routineFocusMode');
+      if (hasBlockingModal) return;
+
+      const lowerKey = e.key.toLowerCase();
+      if (lowerKey === 'n' || e.code === 'KeyN') {
+        e.preventDefault();
+        openItemModalForCreate('schedule');
+      } else if (lowerKey === 't' || e.code === 'KeyT') {
+        e.preventDefault();
+        openItemModalForCreate('todo');
+      } else if (e.key === '1') {
+        e.preventDefault();
+        switchTab('dashboard');
+      } else if (e.key === '2') {
+        e.preventDefault();
+        switchTab('routines');
+      } else if (e.key === '3') {
+        e.preventDefault();
+        switchTab('calendar');
+      } else if (e.key === '4') {
+        e.preventDefault();
+        switchTab('report');
+      } else if (e.key === '[') {
+        e.preventDefault();
+        if (currentActiveTab === 'calendar') stepCalendarPeriod(-1);
+        else stepDashboardDay(-1);
+      } else if (e.key === ']') {
+        e.preventDefault();
+        if (currentActiveTab === 'calendar') stepCalendarPeriod(1);
+        else stepDashboardDay(1);
+      } else if ((lowerKey === 'f' || e.code === 'KeyF') && currentActiveTab === 'routines') {
+        e.preventDefault();
+        if (routineFocusMode) closeModalWindow('routineFocusMode');
+        else openModalWindow('routineFocusMode');
       }
     });
   }

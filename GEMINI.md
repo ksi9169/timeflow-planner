@@ -11,6 +11,13 @@
   - Database & Keep-Alive: LocalStorage 즉시 저장 + Supabase(`public.escape_rooms` 테이블 `TIMEFLOW:<동기화코드>` 실시간 클라우드 동기화) + 3일 주기 이중 잠김 방지(Cloudflare Cron `0 0 */3 * *` + [`.github/workflows/keep-alive.yml`](file:///g:/내%20드라이브/바이브%20코딩/일정관리/.github/workflows/keep-alive.yml))
 
 ## 2. 최근 완료된 작업 내역
+- **3차 UI 최적화 5종(1·2·3·5·6번) 및 새벽 4시 ~ 익일 새벽 4시 활동 시간대 조절 기능 완료 (2026-11-13)**:
+  - **새벽 · 심야 맞춤형 활동 시간대 조절(`timelineStartHour`, `timelineEndHour`, `autoFoldIdleHours`)**: `오늘` 타임라인과 `캘린더` 주간 시간표 상단에 토글형 시간대 조절 바(`#timelineRangeBar`, `#calWeekRangeBar`)를 추가해 시작 시각(`00:00~09:00`), 종료 시각(`22:00 ~ 익일 04:00`), 원클릭 프리셋(`기본 06~24시` · `새벽형 04~23시` · `심야형 06~익일 01시` · `확장형 04~익일 02시`), `빈 시간대 자동 접기` 옵션을 제공하며, `익일 00:00~03:00` 확장 행은 다음 날짜(`addDaysStr(baseDate, 1)`)와 자동 매핑되어 조회·완료 체크·클릭 추가·드래그 이동·실시간 기준선이 모두 연동되도록 구현
+  - **항목 추가 · 편집 모달 소요 시간 프리셋 & 당일 빈 시간 추천 칩(`#itemModalQuickTimeAssist`)**: `30분` · `1시간` · `1시간 30분` · `2시간` 원클릭 소요 시간 프리셋 버튼과 선택 날짜의 기존 일정을 피해 배치 가능한 최대 5개 빈 시간대 추천 칩(`#itemModalFreeSlotsList`)을 실시간 제공
+  - **루틴 플레이어 몰입형 전체화면 집중 모드(`#playerFocusModeBtn`, `body.is-routine-focus-mode`) & 햅틱 진동 피드백**: 주변 헤더·하단 탭·스튜디오 패널을 숨기고 원형 타이머에만 몰입하는 집중 모드(`Esc` · 브라우저 뒤로가기 `popstate` · `F` 단축키 연동)와 단계 시작·전환·정각 초과·완주 시 모바일 햅틱 피드백(`navigator.vibrate`) 적용
+  - **타임라인 동시 시간대 겹침 일정 좌우 자동 분할(`partitionOverlappingClusters`, `.dt-overlap-grid`)**: 같은 시간 슬롯 안에서 시간이 겹치는 일정·실행 블록을 감지해 좌우 2열 이상 나란히 배치함으로써 동시 일정을 한눈에 구분하도록 개선
+  - **상단 실시간 타이머 배너 미니 플로팅 알약 모드(`#bannerMinimizeBtn`, `#minimizedTimerPill`)**: 진행 중인 상단 타이머 배너에서 `접기`를 누르면 우측 상단 컴팩트 알약 배지로 축소되고 다시 클릭하면 즉시 펼쳐지도록 개선
+  - **PC 키보드 빠른 단축키 안내 창(`#shortcutModal`) & 원키 액션**: 입력창 바깥에서 `N`(새 일정), `T`(새 할 일), `1`~`4`(탭 전환), `[` / `]`(이전·다음 날짜 및 기간), `F`(루틴 집중 모드), `?`(단축키 창 열기·닫기) 원키 조작 지원
 - **모바일 플로팅 빠른 입력(`#mobileQuickFabBtn`) · 모달 바텀 시트 스와이프 닫기 · 좌우 스와이프 탐색 · 실시간 현재 시각 기준선 & 빈 새벽·심야 시간대 접기 · 카드 스와이프 완료/내일 미루기 · 캘린더 헤더 1줄 슬림화 완료 (2026-11-13)**:
   - **모바일 상단 공간 확보 및 우측 하단 `+` 플로팅 버튼(`#mobileQuickFabBtn`) 바텀 시트 전환**: 모바일(`<= 768px`)에서 상단 빠른 입력 바(`#quickInputSection`)를 기본 숨김 처리해 세로 뷰포트를 확보하고, 우측 하단 `+` 버튼 터치 시 `#mobileQuickBackdrop` 위의 바텀 시트로 열리며 등록·AI 등록 완료·뒤로가기·배경 터치·아래로 쓸어내리기로 즉시 닫히도록 구현(모달 열림 시 `body.has-open-overlay`로 FAB 자동 숨김)
   - **모바일 전 모달 바텀 시트화 및 아래로 쓸어내려 닫기(`bindMobileSheetSwipeToClose`)**: 모바일(`<= 768px`)에서 긴급 알람(`#alarmModal`)을 제외한 모든 모달과 `#calendarSidePanel`을 상단 드래그 핸들 바가 있는 네이티브 바텀 시트(`border-radius: 22px 22px 0 0`)로 전환하고, 헤더나 스크롤 최상단에서 아래로 당겨 닫는 터치 제스처 지원

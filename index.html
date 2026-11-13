@@ -62,8 +62,14 @@
       <button type="button" id="bannerCompleteBtn" class="btn-xs btn-accent">완료</button>
       <button type="button" id="bannerPauseBtn" class="btn-xs btn-ghost">일시정지</button>
       <button type="button" id="bannerGoPlayerBtn" class="btn-xs btn-outline">열기</button>
+      <button type="button" id="bannerMinimizeBtn" class="btn-xs btn-ghost" title="상단 배너를 작은 플로팅 알약으로 접습니다">접기</button>
     </div>
   </div>
+  <button type="button" id="minimizedTimerPill" class="minimized-timer-pill hidden" title="실시간 타이머 배너 펼치기" aria-label="실시간 타이머 배너 펼치기">
+    <span class="pulse-dot"></span>
+    <span id="minTimerClock" class="min-timer-clock">00:00</span>
+    <span id="minTimerTitle" class="min-timer-title">진행 중</span>
+  </button>
 
   <!-- 심플 최상단 헤더 -->
   <header class="app-header">
@@ -108,15 +114,19 @@
       </button>
     </nav>
 
-    <!-- 우측 최소 유틸리티 버튼 2종 -->
+    <!-- 우측 유틸리티 버튼 -->
     <div class="header-actions">
       <button type="button" id="openSearchModalBtn" class="icon-pill-btn" title="일정, 할 일, 기록, 루틴을 빠르게 검색합니다">
         <svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
         <span>검색</span>
       </button>
+      <button type="button" id="openShortcutModalBtn" class="icon-pill-btn pc-only-pill-btn" title="키보드 빠른 단축키 목록을 확인합니다">
+        <svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2"><rect x="2" y="5" width="20" height="14" rx="2"/><line x1="6" y1="9" x2="6.01" y2="9"/><line x1="10" y1="9" x2="10.01" y2="9"/><line x1="14" y1="9" x2="14.01" y2="9"/><line x1="18" y1="9" x2="18.01" y2="9"/><line x1="7" y1="15" x2="17" y2="15"/></svg>
+        <span>단축키</span>
+      </button>
       <button type="button" id="openSyncModalBtn" class="icon-pill-btn" title="테마, 음성 안내, 카테고리, 클라우드 동기화 및 캘린더 연동을 설정합니다">
         <span id="headerSyncDot" class="sync-dot hidden" aria-hidden="true"></span>
-        <svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>
+        <svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>
         <span id="headerSyncLabel">설정</span>
       </button>
     </div>
@@ -276,12 +286,56 @@
             <div id="dashTrackModeBar" class="timeline-summary-strip">
               <span id="dashTrackSummaryText" class="view-mode-summary">계획 0분 · 실행 0분</span>
               <div class="timeline-summary-actions">
+                <button type="button" id="toggleTimelineRangeBtn" class="btn-xs btn-ghost js-toggle-time-range" aria-expanded="false" title="새벽이나 심야 활동에 맞춰 표시 시간대를 조절합니다">06~24시 ▾</button>
+                <span class="subtle-dot" aria-hidden="true">·</span>
                 <button type="button" id="toggleDurationResizeBtn" class="btn-xs btn-ghost js-toggle-resize-mode" aria-pressed="false" title="켜면 일정 블록 하단 바를 당겨 소요 시간을 15분 단위로 조절할 수 있습니다">시간 늘리기</button>
                 <span class="subtle-dot" aria-hidden="true">·</span>
                 <button type="button" id="aiRescheduleBtn" class="btn-link-subtle ai-link-subtle" title="밀린 오늘 일정을 현재 시각 이후로 재배치합니다">AI 재배치</button>
                 <span class="subtle-dot" aria-hidden="true">·</span>
                 <button type="button" id="openAddActualBtn" class="btn-link-subtle">+ 실행 기록</button>
               </div>
+            </div>
+
+            <!-- 활동 시간대 조절 바 -->
+            <div id="timelineRangeBar" class="timeline-range-bar js-time-range-drawer hidden" aria-label="타임라인 표시 시간대 설정">
+              <div class="trb-selects">
+                <label class="trb-field">
+                  <span>시작</span>
+                  <select class="js-time-start-select" aria-label="타임라인 시작 시각">
+                    <option value="0">00:00</option>
+                    <option value="3">03:00</option>
+                    <option value="4">04:00</option>
+                    <option value="5">05:00</option>
+                    <option value="6" selected>06:00</option>
+                    <option value="7">07:00</option>
+                    <option value="8">08:00</option>
+                    <option value="9">09:00</option>
+                  </select>
+                </label>
+                <span class="trb-tilde" aria-hidden="true">~</span>
+                <label class="trb-field">
+                  <span>종료</span>
+                  <select class="js-time-end-select" aria-label="타임라인 종료 시각">
+                    <option value="22">22:00</option>
+                    <option value="23">23:00</option>
+                    <option value="24" selected>24:00 자정</option>
+                    <option value="25">익일 01:00</option>
+                    <option value="26">익일 02:00</option>
+                    <option value="27">익일 03:00</option>
+                    <option value="28">익일 04:00</option>
+                  </select>
+                </label>
+              </div>
+              <div class="trb-presets">
+                <button type="button" class="time-range-preset-btn" data-start="6" data-end="24" data-fold="true">기본 06~24시</button>
+                <button type="button" class="time-range-preset-btn" data-start="4" data-end="23" data-fold="false">새벽형 04~23시</button>
+                <button type="button" class="time-range-preset-btn" data-start="6" data-end="25" data-fold="false">심야형 06~익일 01시</button>
+                <button type="button" class="time-range-preset-btn" data-start="4" data-end="26" data-fold="false">확장형 04~익일 02시</button>
+              </div>
+              <label class="checkbox-label trb-fold-check">
+                <input type="checkbox" class="js-auto-fold-check" checked />
+                <span>빈 시간대 자동 접기</span>
+              </label>
             </div>
 
             <!-- 일별 타임라인 -->
@@ -311,6 +365,7 @@
             <div class="player-top-meta">
               <span id="playerStepCounter" class="step-counter-pill">0 / 0 단계</span>
               <span id="playerTotalRemaining" class="total-remain-pill">총 0분</span>
+              <button type="button" id="playerFocusModeBtn" class="btn-xs btn-outline player-focus-btn" aria-pressed="false" title="주변 메뉴를 숨기고 루틴 타이머에만 집중합니다">집중 모드</button>
             </div>
           </div>
 
@@ -449,7 +504,46 @@
             </div>
             <div class="view-mode-right">
               <span id="calWeekSummaryBadges" class="view-mode-summary">계획 0분 · 실행 0분</span>
+              <button type="button" id="calWeekTimeRangeBtn" class="btn-xs btn-ghost js-toggle-time-range hidden" aria-expanded="false" title="주간 시간표 표시 시간대를 조절합니다">06~24시 ▾</button>
               <button type="button" id="calWeekResizeModeBtn" class="btn-xs btn-ghost js-toggle-resize-mode hidden" aria-pressed="false" title="켜면 시간표 블록 하단 바를 당겨 소요 시간을 조절할 수 있습니다">시간 늘리기</button>
+            </div>
+          </div>
+
+          <!-- 주간 시간표 활동 시간대 조절 바 -->
+          <div id="calWeekRangeBar" class="timeline-range-bar js-time-range-drawer hidden" aria-label="주간 시간표 표시 시간대 설정">
+            <div class="trb-selects">
+              <label class="trb-field">
+                <span>시작</span>
+                <select class="js-time-start-select" aria-label="시간표 시작 시각">
+                  <option value="0">00:00</option>
+                  <option value="3">03:00</option>
+                  <option value="4">04:00</option>
+                  <option value="5">05:00</option>
+                  <option value="6" selected>06:00</option>
+                  <option value="7">07:00</option>
+                  <option value="8">08:00</option>
+                  <option value="9">09:00</option>
+                </select>
+              </label>
+              <span class="trb-tilde" aria-hidden="true">~</span>
+              <label class="trb-field">
+                <span>종료</span>
+                <select class="js-time-end-select" aria-label="시간표 종료 시각">
+                  <option value="22">22:00</option>
+                  <option value="23">23:00</option>
+                  <option value="24" selected>24:00 자정</option>
+                  <option value="25">익일 01:00</option>
+                  <option value="26">익일 02:00</option>
+                  <option value="27">익일 03:00</option>
+                  <option value="28">익일 04:00</option>
+                </select>
+              </label>
+            </div>
+            <div class="trb-presets">
+              <button type="button" class="time-range-preset-btn" data-start="6" data-end="24" data-fold="true">기본 06~24시</button>
+              <button type="button" class="time-range-preset-btn" data-start="4" data-end="23" data-fold="false">새벽형 04~23시</button>
+              <button type="button" class="time-range-preset-btn" data-start="6" data-end="25" data-fold="false">심야형 06~익일 01시</button>
+              <button type="button" class="time-range-preset-btn" data-start="4" data-end="26" data-fold="false">확장형 04~익일 02시</button>
             </div>
           </div>
 
@@ -794,6 +888,21 @@
             <input type="time" id="itemModalEndTime" value="10:00" />
           </div>
         </div>
+        <div id="itemModalQuickTimeAssist" class="form-row time-assist-box">
+          <div class="time-assist-line">
+            <span class="time-assist-label">소요 시간</span>
+            <div class="dur-preset-group" id="itemModalDurPresets">
+              <button type="button" class="dur-preset-btn" data-dur="30">30분</button>
+              <button type="button" class="dur-preset-btn" data-dur="60">1시간</button>
+              <button type="button" class="dur-preset-btn" data-dur="90">1시간 30분</button>
+              <button type="button" class="dur-preset-btn" data-dur="120">2시간</button>
+            </div>
+          </div>
+          <div id="itemModalFreeSlotsWrap" class="time-assist-line">
+            <span class="time-assist-label">빈 시간 추천</span>
+            <div id="itemModalFreeSlotsList" class="free-slot-chips"></div>
+          </div>
+        </div>
         <div id="itemModalShiftRow" class="form-row">
           <label>빠른 이동</label>
           <div class="quick-shift-btns">
@@ -958,6 +1067,10 @@
             <span class="stb-label">분류 색상 편집</span>
             <strong>카테고리 설정</strong>
           </button>
+          <button type="button" id="syncOpenShortcutBtn" class="settings-tile-btn">
+            <span class="stb-label">키보드 빠른 조작</span>
+            <strong>단축키 안내</strong>
+          </button>
         </div>
       </div>
 
@@ -1075,6 +1188,55 @@
           <button type="button" id="dayDetailAddTodoBtn" class="btn-outline btn-xs">+ 할 일</button>
           <button type="button" id="dayDetailAddActualBtn" class="btn-teal btn-xs">+ 실행 기록</button>
           <button type="button" id="dayDetailAddScheduleBtn" class="btn-primary btn-xs">+ 일정</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ==================== 모달 8: 키보드 단축키 안내 모달 ==================== -->
+  <div id="shortcutModal" class="modal-backdrop hidden" role="dialog" aria-modal="true" aria-labelledby="shortcutModalTitle">
+    <div class="modal-box shortcut-modal-box">
+      <div class="modal-head">
+        <h3 id="shortcutModalTitle">키보드 단축키</h3>
+        <button type="button" class="modal-close-btn" data-close="shortcutModal" aria-label="창 닫기">&times;</button>
+      </div>
+      <p class="shortcut-modal-desc">입력창 바깥에서 키 하나로 빠르게 화면을 이동하고 항목을 등록할 수 있습니다.</p>
+      <div class="shortcut-list-grid">
+        <div class="shortcut-item-row">
+          <span class="shortcut-action-label">새 계획 일정 추가</span>
+          <span class="shortcut-keys"><kbd>N</kbd></span>
+        </div>
+        <div class="shortcut-item-row">
+          <span class="shortcut-action-label">새 할 일 추가</span>
+          <span class="shortcut-keys"><kbd>T</kbd></span>
+        </div>
+        <div class="shortcut-item-row">
+          <span class="shortcut-action-label">오늘 · 루틴 · 캘린더 · 리포트 탭 전환</span>
+          <span class="shortcut-keys"><kbd>1</kbd> ~ <kbd>4</kbd></span>
+        </div>
+        <div class="shortcut-item-row">
+          <span class="shortcut-action-label">이전 · 다음 날짜 및 기간 이동</span>
+          <span class="shortcut-keys"><kbd>[</kbd> <kbd>]</kbd></span>
+        </div>
+        <div class="shortcut-item-row">
+          <span class="shortcut-action-label">루틴 플레이어 집중 모드 전환</span>
+          <span class="shortcut-keys"><kbd>F</kbd></span>
+        </div>
+        <div class="shortcut-item-row">
+          <span class="shortcut-action-label">통합 검색 열기</span>
+          <span class="shortcut-keys"><kbd>Ctrl</kbd> + <kbd>K</kbd></span>
+        </div>
+        <div class="shortcut-item-row">
+          <span class="shortcut-action-label">방금 수행한 작업 실행 취소</span>
+          <span class="shortcut-keys"><kbd>Ctrl</kbd> + <kbd>Z</kbd></span>
+        </div>
+        <div class="shortcut-item-row">
+          <span class="shortcut-action-label">단축키 안내 창 열기 · 닫기</span>
+          <span class="shortcut-keys"><kbd>?</kbd></span>
+        </div>
+        <div class="shortcut-item-row">
+          <span class="shortcut-action-label">열린 창 또는 집중 모드 닫기</span>
+          <span class="shortcut-keys"><kbd>Esc</kbd></span>
         </div>
       </div>
     </div>
