@@ -141,6 +141,29 @@
     return diff > 0 ? diff : 30;
   }
 
+  function isOvernightTimeSpan(startTime, endTime) {
+    if (typeof startTime !== 'string' || typeof endTime !== 'string') return false;
+    const sMins = timeToMinutes(startTime);
+    const eMins = timeToMinutes(endTime);
+    return eMins < sMins && sMins >= 18 * 60 && eMins > 0 && eMins <= 10 * 60;
+  }
+
+  function computeEffectiveDurationMinutes(startTime, endTime) {
+    if (isOvernightTimeSpan(startTime, endTime)) {
+      return 24 * 60 - timeToMinutes(startTime) + timeToMinutes(endTime);
+    }
+    return durationMinutes(startTime, endTime);
+  }
+
+  function addMinutesAllowOvernight(startTime, addMins) {
+    const sMins = timeToMinutes(startTime);
+    const rawEnd = sMins + Math.max(5, Math.round(addMins));
+    if (rawEnd > 24 * 60 && sMins >= 18 * 60 && rawEnd - 24 * 60 <= 10 * 60) {
+      return minutesToTime(rawEnd - 24 * 60);
+    }
+    return minutesToTime(Math.min(23 * 60 + 59, rawEnd));
+  }
+
   function formatDurationKo(mins) {
     const rounded = Math.round(mins);
     const h = Math.floor(rounded / 60);
@@ -374,6 +397,7 @@
         syncCode: '',
         autoSync: true,
         darkMode: false,
+        uiDensity: 'normal',
         timelineStartHour: 6,
         timelineEndHour: 24,
         autoFoldIdleHours: true,
@@ -1791,11 +1815,16 @@
       );
       if (korRange) {
         const startAmPm = korRange[1] || '';
-        const endAmPm = korRange[4] || startAmPm;
+        const rawEndHour = Number(korRange[5]);
         startTime = toValidHHMM(korRange[2], korRange[3], startAmPm);
-        endTime = toValidHHMM(korRange[5], korRange[6], endAmPm);
-        if (!korRange[4] && timeToMinutes(endTime) <= timeToMinutes(startTime) && Number(korRange[5]) < 12) {
-          endTime = toValidHHMM(Number(korRange[5]) + 12, korRange[6], '');
+        if (!korRange[4] && timeToMinutes(startTime) >= 18 * 60 && rawEndHour >= 1 && rawEndHour <= 6) {
+          endTime = toValidHHMM(korRange[5], korRange[6], '새벽');
+        } else {
+          const endAmPm = korRange[4] || startAmPm;
+          endTime = toValidHHMM(korRange[5], korRange[6], endAmPm);
+          if (!korRange[4] && timeToMinutes(endTime) <= timeToMinutes(startTime) && rawEndHour < 12) {
+            endTime = toValidHHMM(rawEndHour + 12, korRange[6], '');
+          }
         }
         explicitRangeParsed = true;
         text = text.replace(korRange[0], '').trim();
@@ -1803,13 +1832,13 @@
         const singleColon = text.match(/(\d{1,2}):(\d{2})/);
         if (singleColon) {
           startTime = toValidHHMM(singleColon[1], singleColon[2]);
-          endTime = minutesToTime(timeToMinutes(startTime) + 60);
+          endTime = addMinutesAllowOvernight(startTime, 60);
           text = text.replace(singleColon[0], '').trim();
         } else {
           const korTime = text.match(/(새벽|오전|오후|저녁|밤)?\s*(\d{1,2})시(?:\s*(\d{1,2})분)?/);
           if (korTime) {
             startTime = toValidHHMM(korTime[2], korTime[3], korTime[1] || '');
-            endTime = minutesToTime(timeToMinutes(startTime) + 60);
+            endTime = addMinutesAllowOvernight(startTime, 60);
             text = text.replace(korTime[0], '').trim();
           }
         }
@@ -1820,13 +1849,13 @@
     const durHourMinMatch = text.match(/(\d+)\s*시간(?:\s*(\d+)\s*분)?/);
     if (durHourMinMatch && startTime && !explicitRangeParsed) {
       const addMins = Number(durHourMinMatch[1]) * 60 + Number(durHourMinMatch[2] || 0);
-      endTime = minutesToTime(timeToMinutes(startTime) + Math.max(5, addMins));
+      endTime = addMinutesAllowOvernight(startTime, Math.max(5, addMins));
       text = text.replace(durHourMinMatch[0], '').trim();
     } else if (startTime && !explicitRangeParsed) {
       const durMinMatch = text.match(/(?:^|\s)(\d+)\s*분(?:\s*동안)?(?=\s|$)/);
       if (durMinMatch) {
         const addMins = Math.max(5, Number(durMinMatch[1]));
-        endTime = minutesToTime(timeToMinutes(startTime) + addMins);
+        endTime = addMinutesAllowOvernight(startTime, addMins);
         text = text.replace(durMinMatch[0], ' ').trim();
       }
     }
@@ -1847,9 +1876,9 @@
     const cleanTitle = text.replace(/\s{2,}/g, ' ').trim() || '새 항목';
     if (!startTime) {
       startTime = getNowTimeStr();
-      endTime = minutesToTime(timeToMinutes(startTime) + 60);
+      endTime = addMinutesAllowOvernight(startTime, 60);
     }
-    if (timeToMinutes(endTime) <= timeToMinutes(startTime)) {
+    if (timeToMinutes(endTime) <= timeToMinutes(startTime) && !isOvernightTimeSpan(startTime, endTime)) {
       if (timeToMinutes(startTime) >= 23 * 60 + 55) {
         startTime = '23:30';
         endTime = '23:59';
@@ -2269,7 +2298,167 @@
   }
 
   function calcBlockMinHeightPx(durMins) {
+    const density = state?.settings?.uiDensity || 'normal';
+    if (density === 'compact') {
+      return Math.max(30, Math.min(136, Math.round(durMins * 0.56)));
+    }
+    if (density === 'relaxed') {
+      return Math.max(54, Math.min(210, Math.round(durMins * 0.92)));
+    }
     return Math.max(46, Math.min(180, Math.round(durMins * 0.78)));
+  }
+
+  function formatDragRangePreviewLabel(minH, maxH) {
+    const endBoundary = maxH + 1;
+    const fmtH = hVal => {
+      if (hVal > 24) return `익일 ${String(hVal - 24).padStart(2, '0')}:00`;
+      if (hVal === 24) return '24:00';
+      return `${String(hVal).padStart(2, '0')}:00`;
+    };
+    const hours = Math.max(1, endBoundary - minH);
+    return `${fmtH(minH)} ~ ${fmtH(endBoundary)} · ${hours}시간`;
+  }
+
+  function bindTimelineSlotDragToCreate(containerEl) {
+    if (!containerEl) return;
+
+    containerEl.addEventListener('pointerdown', e => {
+      if (e.button !== 0) return;
+      if (e.pointerType !== 'mouse' && e.pointerType !== 'pen') return;
+      if (
+        e.target.closest(
+          '.timeline-block, .wk-tt-chip, button, input, label, .tb-resize-handle, .dt-fold-banner'
+        )
+      ) {
+        return;
+      }
+
+      const startCell = e.target.closest('[data-drag-col-key][data-drag-hour]');
+      if (!startCell || !containerEl.contains(startCell)) return;
+
+      const colKey = startCell.dataset.dragColKey;
+      const itemType = startCell.dataset.dragItemType || 'schedule';
+      const baseDate = startCell.dataset.dragBaseDate || selectedDate;
+      const anchorHour = Number(startCell.dataset.dragHour);
+      if (!Number.isFinite(anchorHour)) return;
+
+      const startY = e.clientY;
+      let curHour = anchorHour;
+      let activeDrag = false;
+      let badgeEl = null;
+
+      const clearHighlights = () => {
+        containerEl.querySelectorAll('.is-drag-creating').forEach(el => {
+          el.classList.remove('is-drag-creating');
+        });
+        if (badgeEl) {
+          badgeEl.remove();
+          badgeEl = null;
+        }
+      };
+
+      const updateHighlightRange = () => {
+        const minH = Math.min(anchorHour, curHour);
+        const maxH = Math.max(anchorHour, curHour);
+        const colCells = Array.from(containerEl.querySelectorAll('[data-drag-col-key]')).filter(
+          c => c.dataset.dragColKey === colKey
+        );
+        let topCell = null;
+        colCells.forEach(c => {
+          const h = Number(c.dataset.dragHour);
+          const inSpan = h >= minH && h <= maxH;
+          c.classList.toggle('is-drag-creating', inSpan);
+          if (h === minH) topCell = c;
+        });
+        if (topCell) {
+          if (!badgeEl) {
+            badgeEl = document.createElement('div');
+            badgeEl.className = 'slot-drag-range-badge';
+          }
+          badgeEl.textContent = formatDragRangePreviewLabel(minH, maxH);
+          if (badgeEl.parentElement !== topCell) {
+            topCell.appendChild(badgeEl);
+          }
+        }
+      };
+
+      const resolveHoveredHourInColumn = clientY => {
+        const colCells = Array.from(containerEl.querySelectorAll('[data-drag-col-key]')).filter(
+          c => c.dataset.dragColKey === colKey
+        );
+        if (colCells.length === 0) return anchorHour;
+        let bestHour = anchorHour;
+        let bestDist = Infinity;
+        for (let i = 0; i < colCells.length; i++) {
+          const rect = colCells[i].getBoundingClientRect();
+          const h = Number(colCells[i].dataset.dragHour);
+          if (clientY >= rect.top && clientY <= rect.bottom) {
+            return h;
+          }
+          const dist = clientY < rect.top ? rect.top - clientY : clientY - rect.bottom;
+          if (dist < bestDist) {
+            bestDist = dist;
+            bestHour = h;
+          }
+        }
+        return bestHour;
+      };
+
+      const onPointerMove = ev => {
+        const hoveredH = resolveHoveredHourInColumn(ev.clientY);
+        if (!activeDrag) {
+          if (Math.abs(ev.clientY - startY) < 12 && hoveredH === anchorHour) return;
+          activeDrag = true;
+          document.body.classList.add('is-slot-drag-creating');
+        }
+        curHour = hoveredH;
+        updateHighlightRange();
+      };
+
+      const finishPointerDrag = cancelled => {
+        window.removeEventListener('pointermove', onPointerMove);
+        window.removeEventListener('pointerup', onPointerUp);
+        window.removeEventListener('pointercancel', onPointerCancel);
+        document.body.classList.remove('is-slot-drag-creating');
+        clearHighlights();
+
+        if (!activeDrag || cancelled) return;
+
+        lastDragOrResizeAt = Date.now();
+        const minH = Math.min(anchorHour, curHour);
+        const maxH = Math.max(anchorHour, curHour);
+        const endBoundary = maxH + 1;
+
+        let targetDate = baseDate;
+        let startStr = '09:00';
+        let endStr = '10:00';
+
+        if (minH >= 24) {
+          targetDate = addDaysStr(baseDate, 1);
+          startStr = `${String(minH - 24).padStart(2, '0')}:00`;
+          endStr = `${String(endBoundary - 24).padStart(2, '0')}:00`;
+        } else if (maxH < 24) {
+          targetDate = baseDate;
+          startStr = `${String(minH).padStart(2, '0')}:00`;
+          endStr = endBoundary >= 24 ? '23:59' : `${String(endBoundary).padStart(2, '0')}:00`;
+        } else {
+          targetDate = baseDate;
+          startStr = `${String(minH).padStart(2, '0')}:00`;
+          endStr = `${String(endBoundary - 24).padStart(2, '0')}:00`;
+        }
+
+        selectedDate = baseDate;
+        openItemModalForCreate(itemType, startStr, endStr, '', 'none', targetDate);
+        setTimeout(() => document.getElementById('itemModalTitle')?.focus(), 40);
+      };
+
+      const onPointerUp = () => finishPointerDrag(false);
+      const onPointerCancel = () => finishPointerDrag(true);
+
+      window.addEventListener('pointermove', onPointerMove);
+      window.addEventListener('pointerup', onPointerUp);
+      window.addEventListener('pointercancel', onPointerCancel);
+    });
   }
 
   function adjustItemDurationByStep(item, deltaMins) {
@@ -3320,6 +3509,10 @@
         planCol.className = 'dt-slot-cell';
         planCol.dataset.slotType = 'plan';
         planCol.dataset.hour = String(hour);
+        planCol.dataset.dragColKey = `plan|${selectedDate}`;
+        planCol.dataset.dragItemType = 'schedule';
+        planCol.dataset.dragBaseDate = selectedDate;
+        planCol.dataset.dragHour = String(hour);
         makeSlotDroppable(planCol, {
           targetType: 'schedule',
           targetDate: hourMeta.slotDate,
@@ -3350,6 +3543,10 @@
         actualCol.className = 'dt-slot-cell';
         actualCol.dataset.slotType = 'actual';
         actualCol.dataset.hour = String(hour);
+        actualCol.dataset.dragColKey = `actual|${selectedDate}`;
+        actualCol.dataset.dragItemType = 'actual';
+        actualCol.dataset.dragBaseDate = selectedDate;
+        actualCol.dataset.dragHour = String(hour);
         makeSlotDroppable(actualCol, {
           targetType: 'actual',
           targetDate: hourMeta.slotDate,
@@ -3548,6 +3745,70 @@
     clockEl.textContent = `${hh}:${mm}:${ss}`;
   }
 
+  function appendActualLogWithMidnightSplit({
+    title,
+    startDate,
+    startTime,
+    durationMins,
+    categoryId,
+    projectTag = ''
+  }) {
+    const cleanTag = cleanProjectTag(projectTag);
+    const safeDur = Math.max(5, Math.round(durationMins || 5));
+    let sMins = timeToMinutes(startTime || getNowTimeStr());
+    const endTotalMins = sMins + safeDur;
+
+    if (endTotalMins <= 24 * 60) {
+      if (sMins >= 23 * 60 + 55) {
+        sMins = Math.max(0, 23 * 60 + 59 - safeDur);
+      }
+      const stStr = minutesToTime(sMins);
+      const etStr = minutesToTime(Math.min(23 * 60 + 59, sMins + safeDur));
+      state.actualLogs.push({
+        id: uid('act'),
+        title,
+        date: startDate,
+        startTime: stStr,
+        endTime: etStr,
+        categoryId,
+        projectTag: cleanTag
+      });
+      return 1;
+    }
+
+    const tonightMins = 24 * 60 - sMins;
+    let count = 0;
+    if (tonightMins >= 1) {
+      const safeTonightStart = sMins >= 23 * 60 + 59 ? '23:58' : minutesToTime(sMins);
+      state.actualLogs.push({
+        id: uid('act'),
+        title,
+        date: startDate,
+        startTime: safeTonightStart,
+        endTime: '23:59',
+        categoryId,
+        projectTag: cleanTag
+      });
+      count += 1;
+    }
+
+    const remMins = Math.min(23 * 60 + 59, endTotalMins - 24 * 60);
+    if (remMins >= 1) {
+      state.actualLogs.push({
+        id: uid('act'),
+        title,
+        date: addDaysStr(startDate, 1),
+        startTime: '00:00',
+        endTime: minutesToTime(Math.max(1, remMins)),
+        categoryId,
+        projectTag: cleanTag
+      });
+      count += 1;
+    }
+
+    return count || 1;
+  }
+
   function stopLiveTrackerAndRecord() {
     if (!liveTracker.running) return;
     clearInterval(liveTracker.intervalId);
@@ -3555,11 +3816,7 @@
     releaseWakeLock();
 
     const elapsedMins = Math.max(5, Math.round(liveTracker.elapsedSeconds / 60));
-    let startTime = liveTracker.startTimeStr || getNowTimeStr();
-    if (timeToMinutes(startTime) >= 23 * 60 + 55) {
-      startTime = '23:54';
-    }
-    const endTime = minutesToTime(timeToMinutes(startTime) + elapsedMins);
+    const startTime = liveTracker.startTimeStr || getNowTimeStr();
     const recordDate = liveTracker.startDateStr || getTodayStr();
     const tagInput = document.getElementById('liveTrackerProjectTag');
     const finalTag = cleanProjectTag((tagInput && tagInput.value) || liveTracker.projectTag);
@@ -3569,12 +3826,11 @@
 
     pushUndoSnapshot('타이머 완료 및 자동 기록');
 
-    state.actualLogs.push({
-      id: uid('act'),
+    const splitCount = appendActualLogWithMidnightSplit({
       title: finishedTitle,
-      date: recordDate,
+      startDate: recordDate,
       startTime,
-      endTime,
+      durationMins: elapsedMins,
       categoryId: liveTracker.categoryId,
       projectTag: finalTag
     });
@@ -3607,7 +3863,12 @@
 
     playChimeSound('fanfare');
     speakKorean(`${finishedTitle} 기록이 타임라인에 자동 반영되었습니다.`);
-    showToast(`'${finishedTitle}' ${elapsedMins}분 실행 기록 및 완료 처리되었습니다.`, { withUndo: true });
+    showToast(
+      splitCount > 1
+        ? `'${finishedTitle}' ${elapsedMins}분 기록이 자정 기준으로 날짜별 자동 분할 반영되었습니다.`
+        : `'${finishedTitle}' ${elapsedMins}분 실행 기록 및 완료 처리되었습니다.`,
+      { withUndo: true }
+    );
 
     saveState();
     updateTopBannerUI();
@@ -3845,35 +4106,37 @@
     }
 
     const todayStr = getTodayStr();
+    const recordDate = routinePlayer.startDateStr || todayStr;
     if (!Array.isArray(rtn.completedDates)) rtn.completedDates = [];
-    if (!rtn.completedDates.includes(todayStr)) {
-      rtn.completedDates.push(todayStr);
+    if (!rtn.completedDates.includes(recordDate)) {
+      rtn.completedDates.push(recordDate);
     }
     state.settings.streakDays = computeRoutineStreakDays();
 
-    // 실제 소요 시간을 타임트래커 실제 기록에 자동 반영
+    // 실제 소요 시간을 타임트래커 실제 기록에 자동 반영 (자정 넘김 시 날짜별 자동 분할)
     const plannedMins = rtn.steps.reduce((acc, s) => acc + Number(s.minutes || 0), 0);
     const actualMins = Math.max(5, Math.round(routinePlayer.totalElapsedSeconds / 60) || plannedMins);
-    let startTime = routinePlayer.routineStartTimeStr || getNowTimeStr();
-    if (timeToMinutes(startTime) >= 23 * 60 + 55) {
-      startTime = '23:54';
-    }
-    const endTime = minutesToTime(timeToMinutes(startTime) + actualMins);
-    const recordDate = routinePlayer.startDateStr || todayStr;
+    const startTime = routinePlayer.routineStartTimeStr || getNowTimeStr();
 
-    state.actualLogs.push({
-      id: uid('act'),
+    pushUndoSnapshot('루틴 완주 및 자동 기록');
+    const splitCount = appendActualLogWithMidnightSplit({
       title: `${rtn.name} 완주`,
-      date: recordDate,
+      startDate: recordDate,
       startTime,
-      endTime,
-      categoryId: rtn.categoryId
+      durationMins: actualMins,
+      categoryId: rtn.categoryId,
+      projectTag: ''
     });
 
     triggerHaptic([60, 50, 60, 50, 140]);
     playChimeSound('fanfare');
     speakKorean(`축하합니다! ${rtn.name}을 모두 완주하셨습니다. 실제 사용 시간 타임트래커에 자동 기록되었습니다.`);
-    showToast(`🎉 '${rtn.name}' 완주! 타임트래커에 ${actualMins}분 자동 기록되었습니다.`);
+    showToast(
+      splitCount > 1
+        ? `🎉 '${rtn.name}' 완주! ${actualMins}분 기록이 자정 기준으로 자동 분할 반영되었습니다.`
+        : `🎉 '${rtn.name}' 완주! 타임트래커에 ${actualMins}분 자동 기록되었습니다.`,
+      { withUndo: true }
+    );
 
     saveState();
     updateRoutinePlayerUI();
@@ -5437,6 +5700,10 @@
           const planSlot = document.createElement('div');
           planSlot.className = 'wk-tt-subslot plan-slot';
           planSlot.title = `${dayObj.monthDayLabel} ${hourMeta.shortSlotLabel} 계획 일정 추가`;
+          planSlot.dataset.dragColKey = `wk-plan|${dStr}`;
+          planSlot.dataset.dragItemType = 'schedule';
+          planSlot.dataset.dragBaseDate = dStr;
+          planSlot.dataset.dragHour = String(hour);
           makeSlotDroppable(planSlot, {
             targetType: 'schedule',
             targetDate: hourMeta.slotDate,
@@ -5459,6 +5726,10 @@
           const actualSlot = document.createElement('div');
           actualSlot.className = 'wk-tt-subslot actual-slot';
           actualSlot.title = `${dayObj.monthDayLabel} ${hourMeta.shortSlotLabel} 실행 기록 추가`;
+          actualSlot.dataset.dragColKey = `wk-actual|${dStr}`;
+          actualSlot.dataset.dragItemType = 'actual';
+          actualSlot.dataset.dragBaseDate = dStr;
+          actualSlot.dataset.dragHour = String(hour);
           makeSlotDroppable(actualSlot, {
             targetType: 'actual',
             targetDate: hourMeta.slotDate,
@@ -5482,10 +5753,15 @@
           dayPair.appendChild(actualSlot);
           row.appendChild(dayPair);
         } else {
+          const singleItemType = mode === 'actual' ? 'actual' : 'schedule';
           const slot = document.createElement('div');
           slot.className = `wk-tt-slot ${dStr === todayStr ? 'is-today-col' : ''}`;
+          slot.dataset.dragColKey = `wk-${singleItemType}|${dStr}`;
+          slot.dataset.dragItemType = singleItemType;
+          slot.dataset.dragBaseDate = dStr;
+          slot.dataset.dragHour = String(hour);
           makeSlotDroppable(slot, {
-            targetType: mode === 'actual' ? 'actual' : 'schedule',
+            targetType: singleItemType,
             targetDate: hourMeta.slotDate,
             targetHour: hourMeta.realHour
           });
@@ -5499,7 +5775,7 @@
             if (isJustDraggedOrResized()) return;
             selectedDate = dStr;
             openItemModalForCreate(
-              mode === 'actual' ? 'actual' : 'schedule',
+              singleItemType,
               hourMeta.realHourStr,
               hourMeta.nextRealHourStr,
               '',
@@ -6480,32 +6756,94 @@
     if (!parsed) return;
     const tag = cleanProjectTag(parsed.projectTag || getActiveRealProjectTag());
     const repeat = parsed.repeat || 'none';
+    const overnight =
+      (parsed.type === 'actual' || (parsed.type === 'schedule' && repeat === 'none')) &&
+      isOvernightTimeSpan(parsed.startTime, parsed.endTime);
+
     if (parsed.type === 'actual') {
-      state.actualLogs.push({
-        id: uid('act'),
-        title: parsed.title,
-        date: parsed.date,
-        startTime: parsed.startTime,
-        endTime: parsed.endTime,
-        categoryId: parsed.categoryId,
-        projectTag: tag
-      });
+      if (overnight) {
+        const safeTonightStart =
+          timeToMinutes(parsed.startTime) >= 23 * 60 + 59 ? '23:58' : parsed.startTime;
+        state.actualLogs.push({
+          id: uid('act'),
+          title: parsed.title,
+          date: parsed.date,
+          startTime: safeTonightStart,
+          endTime: '23:59',
+          categoryId: parsed.categoryId,
+          projectTag: tag
+        });
+        state.actualLogs.push({
+          id: uid('act'),
+          title: parsed.title,
+          date: addDaysStr(parsed.date, 1),
+          startTime: '00:00',
+          endTime: parsed.endTime,
+          categoryId: parsed.categoryId,
+          projectTag: tag
+        });
+      } else {
+        state.actualLogs.push({
+          id: uid('act'),
+          title: parsed.title,
+          date: parsed.date,
+          startTime: parsed.startTime,
+          endTime: parsed.endTime,
+          categoryId: parsed.categoryId,
+          projectTag: tag
+        });
+      }
     } else if (parsed.type === 'schedule') {
-      state.schedules.push({
-        id: uid('sch'),
-        title: parsed.title,
-        date: parsed.date,
-        startTime: parsed.startTime,
-        endTime: parsed.endTime,
-        categoryId: parsed.categoryId,
-        projectTag: tag,
-        repeat,
-        completedDates: [],
-        alarm: true,
-        alarmLeadMinutes: 0,
-        important: parsed.important,
-        completed: false
-      });
+      if (overnight) {
+        const safeTonightStart =
+          timeToMinutes(parsed.startTime) >= 23 * 60 + 59 ? '23:58' : parsed.startTime;
+        state.schedules.push({
+          id: uid('sch'),
+          title: parsed.title,
+          date: parsed.date,
+          startTime: safeTonightStart,
+          endTime: '23:59',
+          categoryId: parsed.categoryId,
+          projectTag: tag,
+          repeat: 'none',
+          completedDates: [],
+          alarm: true,
+          alarmLeadMinutes: 0,
+          important: parsed.important,
+          completed: false
+        });
+        state.schedules.push({
+          id: uid('sch'),
+          title: parsed.title,
+          date: addDaysStr(parsed.date, 1),
+          startTime: '00:00',
+          endTime: parsed.endTime,
+          categoryId: parsed.categoryId,
+          projectTag: tag,
+          repeat: 'none',
+          completedDates: [],
+          alarm: false,
+          alarmLeadMinutes: 0,
+          important: parsed.important,
+          completed: false
+        });
+      } else {
+        state.schedules.push({
+          id: uid('sch'),
+          title: parsed.title,
+          date: parsed.date,
+          startTime: parsed.startTime,
+          endTime: parsed.endTime,
+          categoryId: parsed.categoryId,
+          projectTag: tag,
+          repeat,
+          completedDates: [],
+          alarm: true,
+          alarmLeadMinutes: 0,
+          important: parsed.important,
+          completed: false
+        });
+      }
     } else {
       state.todos.push({
         id: uid('todo'),
@@ -6904,7 +7242,7 @@
   function syncItemModalDurationPresetsUI() {
     const startVal = document.getElementById('itemModalStartTime')?.value || '09:00';
     const endVal = document.getElementById('itemModalEndTime')?.value || '10:00';
-    const dur = durationMinutes(startVal, endVal);
+    const dur = computeEffectiveDurationMinutes(startVal, endVal);
     document.querySelectorAll('#itemModalDurPresets .dur-preset-btn').forEach(btn => {
       btn.classList.toggle('active', Number(btn.dataset.dur) === dur);
     });
@@ -6926,7 +7264,7 @@
     const editingId = document.getElementById('itemModalId')?.value || '';
     const startVal = document.getElementById('itemModalStartTime')?.value || '09:00';
     const endVal = document.getElementById('itemModalEndTime')?.value || '10:00';
-    const dur = Math.max(15, Math.min(240, durationMinutes(startVal, endVal) || 60));
+    const dur = Math.max(15, Math.min(240, computeEffectiveDurationMinutes(startVal, endVal) || 60));
 
     const { startHour: cfgStartHour, endHour: cfgEndHour } = getTimelineRangeConfig();
     const dayStartMins = Math.max(0, cfgStartHour * 60);
@@ -7056,6 +7394,7 @@
     document.getElementById('itemModalAlarm').checked = true;
     document.getElementById('itemModalImportant').checked = false;
     document.getElementById('itemModalDeleteBtn').classList.add('hidden');
+    document.getElementById('itemModalDuplicateBtn')?.classList.add('hidden');
     toggleItemModalTimeVisibility(type);
     openModalWindow('itemModal');
   }
@@ -7083,6 +7422,7 @@
     const alarmLeadSel = document.getElementById('itemModalAlarmLead');
     if (alarmLeadSel) alarmLeadSel.value = String(item.alarmLeadMinutes || 0);
     document.getElementById('itemModalDeleteBtn').classList.remove('hidden');
+    document.getElementById('itemModalDuplicateBtn')?.classList.remove('hidden');
     toggleItemModalTimeVisibility(type);
     openModalWindow('itemModal');
   }
@@ -7467,6 +7807,9 @@
       ? Math.max(20, Math.min(28, Math.round(rawEndH)))
       : 24;
     mergedSettings.autoFoldIdleHours = mergedSettings.autoFoldIdleHours !== false;
+    mergedSettings.uiDensity = ['relaxed', 'normal', 'compact'].includes(mergedSettings.uiDensity)
+      ? mergedSettings.uiDensity
+      : 'normal';
 
     return {
       ...fallback,
@@ -8298,7 +8641,16 @@
     showToast('모든 일정, 할 일, 진행 기록이 초기화되었습니다.', { withUndo: true });
   }
 
-  // -------------------- 다크 모드 테마 & 통합 검색 --------------------
+  // -------------------- 다크 모드 테마 · 화면 밀도 · 통합 검색 --------------------
+  function applyDensityUI() {
+    const rawDensity = state.settings && state.settings.uiDensity;
+    const density = ['relaxed', 'normal', 'compact'].includes(rawDensity) ? rawDensity : 'normal';
+    document.documentElement.setAttribute('data-density', density);
+    document.querySelectorAll('#uiDensityTabs [data-density]').forEach(btn => {
+      btn.classList.toggle('active', btn.dataset.density === density);
+    });
+  }
+
   function applyThemeUI() {
     const isDark = Boolean(state.settings && state.settings.darkMode);
     document.documentElement.setAttribute('data-theme', isDark ? 'dark' : 'light');
@@ -8310,6 +8662,7 @@
     const label = document.getElementById('themeToggleLabel');
     if (btn) btn.classList.toggle('active', isDark);
     if (label) label.textContent = isDark ? '다크 모드 켜짐' : '라이트 모드 켜짐';
+    applyDensityUI();
   }
 
   function openGlobalSearchModal() {
@@ -8547,6 +8900,22 @@
       applyThemeUI();
       showToast(state.settings.darkMode ? '다크 모드가 적용되었습니다.' : '라이트 모드가 적용되었습니다.');
     });
+
+    document.querySelectorAll('#uiDensityTabs [data-density]').forEach(btn => {
+      btn.addEventListener('click', () => {
+        const nextDensity = btn.dataset.density || 'normal';
+        if (!['relaxed', 'normal', 'compact'].includes(nextDensity)) return;
+        state.settings.uiDensity = nextDensity;
+        saveState();
+        applyDensityUI();
+        renderAll();
+        const labelMap = { relaxed: '여유', normal: '기본', compact: '촘촘함' };
+        showToast(`화면 밀도가 ${labelMap[nextDensity]} 모드로 변경되었습니다.`);
+      });
+    });
+
+    bindTimelineSlotDragToCreate(document.getElementById('dualTimelineScroll'));
+    bindTimelineSlotDragToCreate(document.getElementById('weekTimetableWrap'));
 
     // 상단 음성 안내 토글
     document.getElementById('ttsToggleBtn').addEventListener('click', () => {
@@ -8793,9 +9162,7 @@
         const startEl = document.getElementById('itemModalStartTime');
         const endEl = document.getElementById('itemModalEndTime');
         if (!startEl || !endEl) return;
-        const curStart = timeToMinutes(startEl.value || '09:00');
-        const nextEnd = Math.min(23 * 60 + 59, curStart + durMins);
-        endEl.value = minutesToTime(nextEnd);
+        endEl.value = addMinutesAllowOvernight(startEl.value || '09:00', durMins);
         syncItemModalDurationPresetsUI();
         renderItemModalFreeSlotChips();
       });
@@ -8820,12 +9187,10 @@
       const endEl = document.getElementById('itemModalEndTime');
       if (!startEl || !endEl) return;
       const curStart = timeToMinutes(startEl.value || '09:00');
-      const curEnd = timeToMinutes(endEl.value || '10:00');
-      const dur = Math.max(15, curEnd - curStart);
-      const nextStart = Math.max(0, Math.min(23 * 60 + 45 - dur, curStart + deltaMinutes));
-      const nextEnd = Math.min(23 * 60 + 59, nextStart + dur);
+      const dur = Math.max(15, computeEffectiveDurationMinutes(startEl.value || '09:00', endEl.value || '10:00'));
+      const nextStart = ((curStart + deltaMinutes) % 1440 + 1440) % 1440;
       startEl.value = minutesToTime(nextStart);
-      endEl.value = minutesToTime(nextEnd);
+      endEl.value = addMinutesAllowOvernight(minutesToTime(nextStart), dur);
       syncItemModalDurationPresetsUI();
       renderItemModalFreeSlotChips();
     };
@@ -8853,7 +9218,7 @@
       showToast(`${targetDate} ${slot.startTime}~${slot.endTime} 빈 시간대가 지정되었습니다. 저장을 누르면 확정됩니다.`);
     });
 
-    // 항목 저장 및 삭제
+    // 항목 저장 · 복제 · 삭제
     document.getElementById('itemModalForm').addEventListener('submit', e => {
       e.preventDefault();
       const id = document.getElementById('itemModalId').value;
@@ -8870,8 +9235,12 @@
       const alarmLeadMinutes = Number(document.getElementById('itemModalAlarmLead')?.value || 0);
       const selectedEstMinutes = Math.max(15, Number(document.getElementById('itemModalEstMinutes')?.value || 30));
 
-      // 종료 시각이 시작 시각보다 빠르거나 같을 경우 자동으로 30분 뒤로 보정
-      if (type !== 'todo' && timeToMinutes(endTime) <= timeToMinutes(startTime)) {
+      const isOvernight =
+        (type === 'actual' || (type === 'schedule' && repeat === 'none')) &&
+        isOvernightTimeSpan(startTime, endTime);
+
+      // 자정 넘김이 아닌데 종료 시각이 시작 시각보다 빠르거나 같을 경우 자동으로 30분 뒤로 보정
+      if (type !== 'todo' && timeToMinutes(endTime) <= timeToMinutes(startTime) && !isOvernight) {
         endTime = minutesToTime(timeToMinutes(startTime) + 30);
       }
 
@@ -8896,31 +9265,89 @@
       }
 
       if (type === 'schedule') {
-        state.schedules.push({
-          id: id || uid('sch'),
-          title,
-          date,
-          startTime,
-          endTime,
-          categoryId,
-          projectTag,
-          repeat,
-          completedDates: prevCompletedDates,
-          alarm,
-          alarmLeadMinutes,
-          important,
-          completed: prevCompleted
-        });
+        if (isOvernight) {
+          state.schedules.push({
+            id: id || uid('sch'),
+            title,
+            date,
+            startTime,
+            endTime: '23:59',
+            categoryId,
+            projectTag,
+            repeat: 'none',
+            completedDates: prevCompletedDates,
+            alarm,
+            alarmLeadMinutes,
+            important,
+            completed: prevCompleted
+          });
+          if (timeToMinutes(endTime) > 0) {
+            state.schedules.push({
+              id: uid('sch'),
+              title,
+              date: addDaysStr(date, 1),
+              startTime: '00:00',
+              endTime,
+              categoryId,
+              projectTag,
+              repeat: 'none',
+              completedDates: [],
+              alarm: false,
+              alarmLeadMinutes: 0,
+              important,
+              completed: prevCompleted
+            });
+          }
+        } else {
+          state.schedules.push({
+            id: id || uid('sch'),
+            title,
+            date,
+            startTime,
+            endTime,
+            categoryId,
+            projectTag,
+            repeat,
+            completedDates: prevCompletedDates,
+            alarm,
+            alarmLeadMinutes,
+            important,
+            completed: prevCompleted
+          });
+        }
       } else if (type === 'actual') {
-        state.actualLogs.push({
-          id: id || uid('act'),
-          title,
-          date,
-          startTime,
-          endTime,
-          categoryId,
-          projectTag
-        });
+        if (isOvernight) {
+          state.actualLogs.push({
+            id: id || uid('act'),
+            title,
+            date,
+            startTime,
+            endTime: '23:59',
+            categoryId,
+            projectTag
+          });
+          if (timeToMinutes(endTime) > 0) {
+            state.actualLogs.push({
+              id: uid('act'),
+              title,
+              date: addDaysStr(date, 1),
+              startTime: '00:00',
+              endTime,
+              categoryId,
+              projectTag
+            });
+          }
+        } else {
+          state.actualLogs.push({
+            id: id || uid('act'),
+            title,
+            date,
+            startTime,
+            endTime,
+            categoryId,
+            projectTag
+          });
+        }
       } else {
         state.todos.push({
           id: id || uid('todo'),
@@ -8939,7 +9366,23 @@
       closeModalWindow('itemModal');
       saveState();
       renderAll();
-      showToast(`'${title}' 항목이 저장되었습니다.`, { withUndo: true });
+      if (isOvernight) {
+        showToast('자정을 넘기는 시간대여서 당일 심야와 익일 새벽 구간으로 자동 분할 저장되었습니다.', {
+          withUndo: true
+        });
+      } else {
+        showToast(`'${title}' 항목이 저장되었습니다.`, { withUndo: true });
+      }
+    });
+
+    document.getElementById('itemModalDuplicateBtn')?.addEventListener('click', () => {
+      document.getElementById('itemModalId').value = '';
+      document.getElementById('itemModalDeleteBtn')?.classList.add('hidden');
+      document.getElementById('itemModalDuplicateBtn')?.classList.add('hidden');
+      const headingEl = document.getElementById('itemModalHeading');
+      if (headingEl) headingEl.textContent = '항목 복제 추가';
+      renderItemModalFreeSlotChips();
+      showToast('복제 모드로 전환되었습니다. 날짜나 시간을 조정한 뒤 저장하세요.');
     });
 
     document.getElementById('itemModalDeleteBtn').addEventListener('click', () => {

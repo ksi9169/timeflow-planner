@@ -7101,3 +7101,146 @@ body.is-routine-focus-mode .player-big-time {
     grid-template-columns: minmax(0, 1fr);
   }
 }
+
+/* ==================== 4차 UI 최적화: 글자 크기 · 타임라인 밀도 조절 & 빈 시간 드래그 생성 ==================== */
+.density-setting-bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  margin-top: 8px;
+  padding: 9px 12px;
+  border-radius: 10px;
+  border: 1px solid var(--border-color);
+  background: var(--bg-subtle);
+}
+
+.density-setting-text {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+
+.density-setting-text strong {
+  font-size: 0.82rem;
+  font-weight: 800;
+  color: var(--text-main);
+}
+
+.density-setting-text span {
+  font-size: 0.72rem;
+  font-weight: 600;
+  color: var(--text-sub);
+}
+
+/* 여유 밀도 */
+html[data-density="relaxed"] {
+  font-size: 16.8px;
+}
+
+html[data-density="relaxed"] .dt-hour-row {
+  min-height: 66px;
+}
+
+html[data-density="relaxed"] .wk-tt-row:not(.wk-tt-header-row) {
+  min-height: 58px;
+}
+
+html[data-density="relaxed"] .todo-item-card {
+  padding: 11px 12px;
+}
+
+html[data-density="relaxed"] .timeline-block {
+  padding: 8px 11px;
+}
+
+/* 촘촘함 밀도 */
+html[data-density="compact"] {
+  font-size: 15px;
+}
+
+html[data-density="compact"] .dt-hour-row {
+  min-height: 38px;
+}
+
+html[data-density="compact"] .dt-slot-cell {
+  padding: 3px 6px;
+  gap: 3px;
+}
+
+html[data-density="compact"] .timeline-block {
+  padding: 4px 8px;
+  gap: 2px;
+}
+
+html[data-density="compact"] .wk-tt-row:not(.wk-tt-header-row) {
+  min-height: 36px;
+}
+
+html[data-density="compact"] .todo-item-card {
+  padding: 6px 9px;
+}
+
+/* 타임라인 빈 구간 드래그 생성 피드백 */
+body.is-slot-drag-creating {
+  user-select: none !important;
+  -webkit-user-select: none !important;
+  cursor: ns-resize !important;
+}
+
+.dt-slot-cell.is-drag-creating,
+.wk-tt-subslot.is-drag-creating,
+.wk-tt-slot.is-drag-creating {
+  background: rgba(79, 70, 229, 0.14) !important;
+  box-shadow: inset 0 0 0 1.5px rgba(79, 70, 229, 0.65);
+  border-radius: 6px;
+}
+
+[data-theme="dark"] .dt-slot-cell.is-drag-creating,
+[data-theme="dark"] .wk-tt-subslot.is-drag-creating,
+[data-theme="dark"] .wk-tt-slot.is-drag-creating {
+  background: rgba(99, 102, 241, 0.24) !important;
+  box-shadow: inset 0 0 0 1.5px rgba(129, 140, 248, 0.78);
+}
+
+.slot-drag-range-badge {
+  position: fixed;
+  z-index: 9999;
+  pointer-events: none;
+  padding: 6px 12px;
+  border-radius: 999px;
+  background: var(--primary);
+  color: #FFFFFF;
+  font-size: 0.78rem;
+  font-weight: 800;
+  white-space: nowrap;
+  box-shadow: 0 8px 22px rgba(79, 70, 229, 0.36);
+}
+
+@media (max-width: 680px) {
+  .density-setting-bar {
+    flex-direction: column;
+    align-items: stretch;
+  }
+
+  .density-setting-bar .mode-pill-group {
+    width: 100%;
+    display: grid;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+
+  .density-setting-bar .mode-pill-btn {
+    justify-content: center;
+    text-align: center;
+  }
+
+  html[data-density="relaxed"] {
+    font-size: 16.2px;
+  }
+
+  html[data-density="compact"] {
+    font-size: 14.4px;
+  }
+}
+
