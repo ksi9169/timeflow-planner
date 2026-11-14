@@ -799,8 +799,10 @@
   // 일별·주별 표시 모드: PC는 나란히(both), 모바일은 단일 컬럼 계획(plan) 기본
   let dashTrackMode = typeof window !== 'undefined' && window.innerWidth <= 768 ? 'plan' : 'both';
   let dashMonthMode = 'focus';
-  // 모바일 안 B 상단 할 일·루틴 드로어 접힘 상태 (모바일 기본 접힘)
-  let mobileTodoFolded = true;
+  // 모바일 상단 요약 바 분리 토글 상태 ('none' | 'todos' | 'routines')
+  let mobileDrawerSection = 'none';
+  const collapsedProjectTags = new Set();
+  const expandedProjectScheduleTags = new Set();
 
   // 탭 3 주간·월간 전체 조망 상태
   let currentCalView = 'month';
@@ -809,7 +811,6 @@
   let calMonthMode = 'focus';
   let currentMilestoneFilter = 'all';
   let calSideOpen = false;
-  let calToolsOpen = false;
 
   let currentTodoFilter = 'today';
   let currentReportPeriod = 'thisMonth';
@@ -1050,6 +1051,7 @@
     const backdrop = document.getElementById('mobileQuickBackdrop');
     const fab = document.getElementById('mobileQuickFabBtn');
     const inMob = isMobileQuickFabViewport();
+    const hideFabOnTab = currentActiveTab === 'routines' || currentActiveTab === 'report';
     const shouldShowSheet = inMob && mobileQuickInputOpen;
     if (sec) {
       sec.classList.toggle('is-mobile-open', shouldShowSheet);
@@ -1063,6 +1065,7 @@
     }
     if (fab) {
       fab.setAttribute('aria-expanded', String(shouldShowSheet));
+      fab.classList.toggle('is-tab-hidden', hideFabOnTab);
     }
   }
 
@@ -1938,14 +1941,15 @@
       sectionEl.classList.toggle('hidden', !shouldShowBar);
     }
 
-    const btnText =
-      selectedProjectTag === '__UNTAGGED__'
-        ? '프로젝트 · 미지정'
-        : selectedProjectTag
-        ? `@${selectedProjectTag}`
-        : '프로젝트';
-
     toggleBtns.forEach(btn => {
+      const isCalCompact = btn.id === 'calToggleProjectFilterBtn';
+      const baseLabel = isCalCompact ? '태그' : '프로젝트';
+      const btnText =
+        selectedProjectTag === '__UNTAGGED__'
+          ? `${baseLabel} · 미지정`
+          : selectedProjectTag
+          ? `@${selectedProjectTag}`
+          : baseLabel;
       btn.classList.toggle('hidden', !hasTags && !hasActiveFilter);
       btn.classList.toggle('active', projectTagBarOpen || hasActiveFilter);
       btn.setAttribute('aria-expanded', String(shouldShowBar));
@@ -2068,16 +2072,31 @@
 
   function syncMobileDrawerUI() {
     const collapsible = document.getElementById('dashLeftCollapsible');
-    const toggleBtn = document.getElementById('mobileDrawerToggleBtn');
-    const chevron = document.getElementById('mobileDrawerChevron');
+    const todoBtn = document.getElementById('mobileDrawerTodoTabBtn');
+    const todoChev = document.getElementById('mobileDrawerTodoChevron');
+    const rtnBtn = document.getElementById('mobileDrawerRoutineTabBtn');
+    const rtnChev = document.getElementById('mobileDrawerRoutineChevron');
+
+    const isTodosOpen = mobileDrawerSection === 'todos';
+    const isRoutinesOpen = mobileDrawerSection === 'routines';
+
     if (collapsible) {
-      collapsible.classList.toggle('is-collapsed', mobileTodoFolded);
+      collapsible.dataset.mobileDrawer = mobileDrawerSection;
+      collapsible.classList.toggle('is-collapsed', mobileDrawerSection === 'none');
     }
-    if (toggleBtn) {
-      toggleBtn.setAttribute('aria-expanded', String(!mobileTodoFolded));
+    if (todoBtn) {
+      todoBtn.classList.toggle('active', isTodosOpen);
+      todoBtn.setAttribute('aria-expanded', String(isTodosOpen));
     }
-    if (chevron) {
-      chevron.textContent = mobileTodoFolded ? '펼치기 ▾' : '접기 ▴';
+    if (todoChev) {
+      todoChev.textContent = isTodosOpen ? '▴' : '▾';
+    }
+    if (rtnBtn) {
+      rtnBtn.classList.toggle('active', isRoutinesOpen);
+      rtnBtn.setAttribute('aria-expanded', String(isRoutinesOpen));
+    }
+    if (rtnChev) {
+      rtnChev.textContent = isRoutinesOpen ? '▴' : '▾';
     }
   }
 
@@ -2250,16 +2269,22 @@
       r => doesRoutineOccurOnDate(r, selectedDate) && !(Array.isArray(r.completedDates) && r.completedDates.includes(selectedDate))
     ).length;
 
-    const mobileSummaryEl = document.getElementById('mobileDrawerSummaryText');
-    if (mobileSummaryEl) {
-      const dayPrefix = isToday ? '오늘' : formatShortMonthDayKo(selectedDate);
-      if (remainingTodos === 0 && remainingRoutines === 0) {
-        mobileSummaryEl.textContent = `${dayPrefix} 할 일 · 루틴 모두 완료`;
-      } else {
-        const parts = [`${dayPrefix} 할 일 ${remainingTodos}건`];
-        if (remainingRoutines > 0) parts.push(`루틴 ${remainingRoutines}건`);
-        mobileSummaryEl.textContent = parts.join(' · ');
-      }
+    const dayPrefix = isToday ? '오늘' : formatShortMonthDayKo(selectedDate);
+    const mobileTodoEl = document.getElementById('mobileDrawerTodoText');
+    const mobileRtnEl = document.getElementById('mobileDrawerRoutineText');
+    const mobileRtnBtn = document.getElementById('mobileDrawerRoutineTabBtn');
+    if (mobileTodoEl) {
+      mobileTodoEl.textContent =
+        remainingTodos === 0 ? `${dayPrefix} 할 일 완료` : `${dayPrefix} 할 일 ${remainingTodos}건`;
+    }
+    if (mobileRtnEl) {
+      mobileRtnEl.textContent = remainingRoutines === 0 ? '루틴 완료' : `루틴 ${remainingRoutines}건`;
+    }
+    if (mobileRtnBtn) {
+      mobileRtnBtn.classList.toggle('is-empty', remainingRoutines === 0);
+    }
+    if (mobileDrawerSection === 'routines' && remainingRoutines === 0) {
+      mobileDrawerSection = 'none';
     }
 
     const datePicker = document.getElementById('quickDatePicker');
@@ -3053,15 +3078,21 @@
         .filter(a => cleanProjectTag(a.projectTag) === tag)
         .reduce((acc, a) => acc + durationMinutes(a.startTime, a.endTime), 0);
 
+      const isGroupCollapsed = collapsedProjectTags.has(tag);
       const block = document.createElement('div');
-      block.className = 'project-group-block';
+      block.className = `project-group-block ${isGroupCollapsed ? 'is-group-collapsed' : ''}`;
 
       const head = document.createElement('div');
-      head.className = 'project-group-head';
+      head.className = 'project-group-head is-collapsible-head';
+      head.setAttribute('role', 'button');
+      head.setAttribute('tabindex', '0');
+      head.setAttribute('aria-expanded', String(!isGroupCollapsed));
+      const schStatPart = tagSchedules.length > 0 ? ` · 일정 ${tagSchedules.length}건` : '';
       head.innerHTML = `
         <div class="pg-head-left">
+          <span class="pg-fold-chev" aria-hidden="true">${isGroupCollapsed ? '▸' : '▾'}</span>
           <span class="pg-tag-badge">@${escapeHtml(tag)}</span>
-          <span class="pg-meta-stats">할 일 ${doneTagTodos}/${allTagTodos.length}${tagActualMins > 0 ? ` · ${formatShortDurationKo(tagActualMins)}` : ''}</span>
+          <span class="pg-meta-stats">할 일 ${doneTagTodos}/${allTagTodos.length}${schStatPart}${tagActualMins > 0 ? ` · ${formatShortDurationKo(tagActualMins)}` : ''}</span>
         </div>
         <div class="pg-head-right">
           <button type="button" class="pg-quick-add-btn pg-add-todo-btn" title="이 프로젝트 태그로 할 일 추가">+ 할 일</button>
@@ -3069,65 +3100,114 @@
         </div>
       `;
 
-      head.querySelector('.pg-add-todo-btn').addEventListener('click', () => {
+      const toggleGroupFold = () => {
+        if (collapsedProjectTags.has(tag)) collapsedProjectTags.delete(tag);
+        else collapsedProjectTags.add(tag);
+        renderTodoList();
+      };
+
+      head.addEventListener('click', e => {
+        if (e.target.closest('button')) return;
+        toggleGroupFold();
+      });
+      head.addEventListener('keydown', e => {
+        if (e.target !== head) return;
+        if (e.key === 'Enter' || e.key === ' ') {
+          e.preventDefault();
+          toggleGroupFold();
+        }
+      });
+
+      head.querySelector('.pg-add-todo-btn').addEventListener('click', e => {
+        e.stopPropagation();
         openItemModalForCreate('todo', '09:00', '10:00', tag);
       });
-      head.querySelector('.pg-add-sch-btn').addEventListener('click', () => {
+      head.querySelector('.pg-add-sch-btn').addEventListener('click', e => {
+        e.stopPropagation();
         openItemModalForCreate('schedule', '10:00', '11:00', tag, 'weekly');
       });
 
       block.appendChild(head);
 
-      const body = document.createElement('div');
-      body.className = 'pg-body-items';
+      if (!isGroupCollapsed) {
+        const body = document.createElement('div');
+        body.className = 'pg-body-items';
 
-      // 프로젝트 소속 정기 일정(매주 안내, 정기 회의 등) 미니 리스트 표시
-      if (tagSchedules.length > 0 && currentTodoFilter !== 'backlog') {
-        const schList = document.createElement('div');
-        schList.className = 'pg-schedule-mini-list';
-        tagSchedules.forEach(sch => {
-          const repLabel = getRepeatLabelKo(sch.repeat, sch.date);
-          const isSchDone = isItemCompletedOnDate(sch, selectedDate);
-          const sItem = document.createElement('div');
-          sItem.className = 'pg-schedule-mini-item';
-          sItem.innerHTML = `
-            <div style="display:flex;align-items:center;gap:6px;min-width:0;">
-              <input type="checkbox" class="pg-sch-check" ${isSchDone ? 'checked' : ''} title="일정 완료 체크" />
-              ${repLabel ? `<span class="repeat-badge">${escapeHtml(repLabel)}</span>` : '<span class="wk-type-tag plan">일정</span>'}
-              <span style="font-weight:700;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;${isSchDone ? 'text-decoration:line-through;opacity:0.6;' : ''}">${escapeHtml(sch.title)}</span>
-            </div>
-            <span style="font-size:0.72rem;color:var(--primary);font-weight:700;flex-shrink:0;">${sch.startTime}</span>
+        // 프로젝트 소속 연결 일정은 내부 서브 토글로 기본 접힘 표시 (반복 탭 조회 시에만 기본 펼침)
+        if (tagSchedules.length > 0 && currentTodoFilter !== 'backlog') {
+          const schToggleKey = currentTodoFilter === 'recurring' ? `rec:${tag}` : tag;
+          const isSchOpen =
+            currentTodoFilter === 'recurring'
+              ? !expandedProjectScheduleTags.has(schToggleKey)
+              : expandedProjectScheduleTags.has(schToggleKey);
+          const doneSchCount = tagSchedules.filter(s => isItemCompletedOnDate(s, selectedDate)).length;
+
+          const subToggleBtn = document.createElement('button');
+          subToggleBtn.type = 'button';
+          subToggleBtn.className = `pg-sch-subtoggle-btn ${isSchOpen ? 'active' : ''}`;
+          subToggleBtn.setAttribute('aria-expanded', String(isSchOpen));
+          subToggleBtn.innerHTML = `
+            <span class="pg-sch-sub-left">연결 일정 ${tagSchedules.length}건 · 완료 ${doneSchCount}/${tagSchedules.length}</span>
+            <span class="pg-sch-sub-chev">${isSchOpen ? '접기 ▴' : '보기 ▾'}</span>
           `;
-          sItem.querySelector('.pg-sch-check').addEventListener('click', e => {
-            e.stopPropagation();
-            toggleScheduleCompletedWithActualSync(sch, selectedDate, Boolean(e.target.checked), true);
-            saveState();
-            renderAll();
+          subToggleBtn.addEventListener('click', () => {
+            if (expandedProjectScheduleTags.has(schToggleKey)) expandedProjectScheduleTags.delete(schToggleKey);
+            else expandedProjectScheduleTags.add(schToggleKey);
+            renderTodoList();
           });
-          sItem.addEventListener('click', e => {
-            if (e.target.classList.contains('pg-sch-check')) return;
-            openItemModalForEdit('schedule', sch);
-          });
-          schList.appendChild(sItem);
+          body.appendChild(subToggleBtn);
+
+          if (isSchOpen) {
+            const schList = document.createElement('div');
+            schList.className = 'pg-schedule-mini-list';
+            tagSchedules.forEach(sch => {
+              const repLabel = getRepeatLabelKo(sch.repeat, sch.date);
+              const isSchDone = isItemCompletedOnDate(sch, selectedDate);
+              const sItem = document.createElement('div');
+              sItem.className = 'pg-schedule-mini-item';
+              sItem.innerHTML = `
+                <div style="display:flex;align-items:center;gap:6px;min-width:0;">
+                  <input type="checkbox" class="pg-sch-check" ${isSchDone ? 'checked' : ''} title="일정 완료 체크" />
+                  ${repLabel ? `<span class="repeat-badge">${escapeHtml(repLabel)}</span>` : '<span class="wk-type-tag plan">일정</span>'}
+                  <span style="font-weight:700;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;${isSchDone ? 'text-decoration:line-through;opacity:0.6;' : ''}">${escapeHtml(sch.title)}</span>
+                </div>
+                <span style="font-size:0.72rem;color:var(--primary);font-weight:700;flex-shrink:0;">${sch.startTime}</span>
+              `;
+              sItem.querySelector('.pg-sch-check').addEventListener('click', e => {
+                e.stopPropagation();
+                toggleScheduleCompletedWithActualSync(sch, selectedDate, Boolean(e.target.checked), true);
+                saveState();
+                renderAll();
+              });
+              sItem.addEventListener('click', e => {
+                if (e.target.classList.contains('pg-sch-check')) return;
+                openItemModalForEdit('schedule', sch);
+              });
+              schList.appendChild(sItem);
+            });
+            body.appendChild(schList);
+          }
+        }
+
+        groupTodos.forEach(todo => {
+          body.appendChild(createTodoCardElement(todo));
         });
-        body.appendChild(schList);
+
+        block.appendChild(body);
       }
-
-      groupTodos.forEach(todo => {
-        body.appendChild(createTodoCardElement(todo));
-      });
-
-      block.appendChild(body);
       container.appendChild(block);
     });
 
     if (untaggedTodos.length > 0 && selectedProjectTag !== '__UNTAGGED__') {
       renderedGroups++;
+      const untaggedKey = '__UNTAGGED_GROUP__';
+      const isUntaggedCollapsed = collapsedProjectTags.has(untaggedKey);
       const block = document.createElement('div');
-      block.className = 'project-group-block';
+      block.className = `project-group-block ${isUntaggedCollapsed ? 'is-group-collapsed' : ''}`;
       block.innerHTML = `
-        <div class="project-group-head">
+        <div class="project-group-head is-collapsible-head" role="button" tabindex="0" aria-expanded="${!isUntaggedCollapsed}">
           <div class="pg-head-left">
+            <span class="pg-fold-chev" aria-hidden="true">${isUntaggedCollapsed ? '▸' : '▾'}</span>
             <span class="pg-tag-badge" style="background:var(--bg-subtle);color:var(--text-sub);">개별 할 일</span>
             <span class="pg-meta-stats">${untaggedTodos.length}건</span>
           </div>
@@ -3135,15 +3215,25 @@
             <button type="button" class="pg-quick-add-btn pg-add-untagged-btn">+ 할 일</button>
           </div>
         </div>
-        <div class="pg-body-items"></div>
+        ${isUntaggedCollapsed ? '' : '<div class="pg-body-items"></div>'}
       `;
-      block.querySelector('.pg-add-untagged-btn').addEventListener('click', () => {
+      const uHead = block.querySelector('.project-group-head');
+      uHead.addEventListener('click', e => {
+        if (e.target.closest('button')) return;
+        if (collapsedProjectTags.has(untaggedKey)) collapsedProjectTags.delete(untaggedKey);
+        else collapsedProjectTags.add(untaggedKey);
+        renderTodoList();
+      });
+      block.querySelector('.pg-add-untagged-btn').addEventListener('click', e => {
+        e.stopPropagation();
         openItemModalForCreate('todo', '09:00', '10:00', '');
       });
-      const body = block.querySelector('.pg-body-items');
-      untaggedTodos.forEach(todo => {
-        body.appendChild(createTodoCardElement(todo));
-      });
+      if (!isUntaggedCollapsed) {
+        const body = block.querySelector('.pg-body-items');
+        untaggedTodos.forEach(todo => {
+          body.appendChild(createTodoCardElement(todo));
+        });
+      }
       container.appendChild(block);
     } else if (selectedProjectTag === '__UNTAGGED__' && untaggedTodos.length > 0) {
       renderedGroups++;
@@ -4187,10 +4277,13 @@
       if (badgeEl) badgeEl.textContent = '대기';
       if (stepCounterEl) stepCounterEl.textContent = '0 / 0 단계';
       if (totalRemainEl) totalRemainEl.textContent = '총 0분';
-      if (stepTitleEl) stepTitleEl.textContent = '새 루틴을 추가해 보세요';
+      if (stepTitleEl) {
+        stepTitleEl.textContent = '새 루틴을 추가해 보세요';
+        stepTitleEl.classList.remove('is-long-title');
+      }
       if (countdownEl) countdownEl.textContent = '00:00';
       overtimeEl?.classList.add('hidden');
-      if (tipEl) tipEl.textContent = '좌측 루틴 목록에서 새 루틴을 만들거나 AI 루틴 생성을 이용해 보세요.';
+      if (tipEl) tipEl.textContent = '목록에서 새 루틴을 만들거나 AI 루틴 생성을 이용해 보세요.';
       if (nextStepEl) nextStepEl.textContent = '루틴을 시작하면 다음 단계가 이곳에 표시됩니다.';
       if (queueListEl) queueListEl.innerHTML = '';
       if (btnPrev) btnPrev.disabled = true;
@@ -4225,6 +4318,7 @@
 
     stepCounterEl.textContent = `${currentIdx + 1} / ${rtn.steps.length} 단계`;
     stepTitleEl.textContent = step.title;
+    stepTitleEl.classList.toggle('is-long-title', String(step.title || '').length >= 11);
     tipEl.textContent = step.tip || '타이머에 맞춰 차분하게 현재 행동에만 집중해 보세요.';
     nextStepEl.textContent = nextStep ? `${nextStep.title} · ${nextStep.minutes}분` : '마지막 단계입니다! 완료하면 루틴이 끝납니다.';
 
@@ -4365,8 +4459,6 @@
     const sideEl = document.getElementById('calendarSidePanel');
     const backdropEl = document.getElementById('calendarSideBackdrop');
     const msBtn = document.getElementById('toggleMilestonePanelBtn');
-    const toolsDrawer = document.getElementById('calToolsDrawer');
-    const toolsBtn = document.getElementById('toggleCalToolsBtn');
     const isMobileModal = isMobileMilestoneModalViewport();
 
     layoutEl?.classList.toggle('with-side', calSideOpen && !isMobileModal);
@@ -4376,12 +4468,6 @@
     if (msBtn) {
       msBtn.classList.toggle('active', calSideOpen);
       msBtn.setAttribute('aria-expanded', String(calSideOpen));
-    }
-    toolsDrawer?.classList.toggle('hidden', !calToolsOpen);
-    if (toolsBtn) {
-      toolsBtn.classList.toggle('active', calToolsOpen);
-      toolsBtn.setAttribute('aria-expanded', String(calToolsOpen));
-      toolsBtn.textContent = calToolsOpen ? '도구 ▴' : '도구 ▾';
     }
   }
 
@@ -4444,6 +4530,9 @@
 
       const formatWeekSummaryLine = wStats => {
         if (!wStats) return '';
+        if (isMobileCalendarViewport()) {
+          return `계획 ${formatShortDurationKo(wStats.totalPlanMins)} · 실행 ${formatShortDurationKo(wStats.totalActualMins)}`;
+        }
         const ratePart =
           wStats.totalPlanMins > 0
             ? ` · 실행률 ${Math.min(999, Math.round((wStats.totalActualMins / wStats.totalPlanMins) * 100))}%`
@@ -8833,8 +8922,12 @@
     if (routineFocusMode && tabName !== 'routines') {
       closeModalWindow('routineFocusMode');
     }
+    if (mobileQuickInputOpen && (tabName === 'routines' || tabName === 'report')) {
+      closeModalWindow('quickInputSection');
+    }
     const changed = currentActiveTab !== tabName;
     currentActiveTab = tabName;
+    document.body.dataset.activeTab = tabName;
     document.querySelectorAll('.nav-tab').forEach(btn => {
       btn.classList.toggle('active', btn.dataset.tab === tabName);
     });
@@ -8842,6 +8935,7 @@
       sec.classList.toggle('active', sec.id === `tab-${tabName}`);
     });
     syncProjectTagBarVisibility();
+    syncMobileQuickInputUI();
     if (changed) {
       renderActiveTabViews(false);
     }
@@ -9040,9 +9134,24 @@
       renderAll();
     });
 
-    // 모바일 안 B 상단 할 일·루틴 접이식 드로어 토글
-    document.getElementById('mobileDrawerToggleBtn')?.addEventListener('click', () => {
-      mobileTodoFolded = !mobileTodoFolded;
+    // 모바일 상단 요약 바 분리형 할 일 / 루틴 개별 토글
+    document.getElementById('mobileDrawerTodoTabBtn')?.addEventListener('click', () => {
+      mobileDrawerSection = mobileDrawerSection === 'todos' ? 'none' : 'todos';
+      syncMobileDrawerUI();
+    });
+    document.getElementById('mobileDrawerRoutineTabBtn')?.addEventListener('click', () => {
+      const hasRemainingRoutines = state.routines.some(
+        r =>
+          doesRoutineOccurOnDate(r, selectedDate) &&
+          !(Array.isArray(r.completedDates) && r.completedDates.includes(selectedDate))
+      );
+      if (!hasRemainingRoutines) {
+        mobileDrawerSection = 'none';
+        syncMobileDrawerUI();
+        showToast('선택한 날짜에 남은 루틴이 없습니다.');
+        return;
+      }
+      mobileDrawerSection = mobileDrawerSection === 'routines' ? 'none' : 'routines';
       syncMobileDrawerUI();
     });
     document.getElementById('mobileQuickAddTodoBtn')?.addEventListener('click', () => {
@@ -9711,10 +9820,6 @@
     document.getElementById('calendarSideBackdrop')?.addEventListener('click', () => {
       closeModalWindow('calendarSidePanel');
     });
-    document.getElementById('toggleCalToolsBtn')?.addEventListener('click', () => {
-      calToolsOpen = !calToolsOpen;
-      syncCalendarPanelsUI();
-    });
 
     const stepDayDetailModal = dir => {
       dayDetailDate = addDaysStr(dayDetailDate || selectedDate, dir);
@@ -9746,24 +9851,14 @@
       openItemModalForCreate('actual', '09:00', '10:00');
     });
 
-    document.getElementById('calAddScheduleBtn')?.addEventListener('click', () => openItemModalForCreate('schedule'));
-    document.getElementById('calAddTodoBtn')?.addEventListener('click', () => openItemModalForCreate('todo'));
-    document.getElementById('calAddActualBtn')?.addEventListener('click', () => openItemModalForCreate('actual'));
-    document.getElementById('calExportIcsBtn')?.addEventListener('click', exportCalendarIcsFile);
-    document.getElementById('calImportIcsInput')?.addEventListener('change', e => {
-      const file = e.target.files?.[0];
-      if (!file) return;
-      const reader = new FileReader();
-      reader.onload = ev => {
-        try {
-          importCalendarIcsText(String(ev.target.result || ''));
-        } catch (_) {
-          showToast('캘린더 파일을 읽는 중 오류가 발생했습니다.');
-        } finally {
-          e.target.value = '';
-        }
-      };
-      reader.readAsText(file);
+    document.getElementById('calAddScheduleBtn')?.addEventListener('click', () => {
+      const defaultType =
+        currentCalView === 'week' && calWeekMode === 'actual'
+          ? 'actual'
+          : currentCalView === 'month' && calMonthMode === 'deadline'
+          ? 'todo'
+          : 'schedule';
+      openItemModalForCreate(defaultType);
     });
 
     // 탭 4: 타임트래커 보고서 및 다음 달 목표 이벤트
@@ -10346,6 +10441,7 @@
       }
     });
 
+    document.body.dataset.activeTab = currentActiveTab;
     applyThemeUI();
     syncMobileQuickInputUI();
     refreshKoreanSpeechVoice();

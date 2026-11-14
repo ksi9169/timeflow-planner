@@ -207,18 +207,24 @@
       <div class="dashboard-two-col">
         <!-- 좌측 컬럼 (PC 상시 표시 / 모바일 상단 접이식 요약 드로어) -->
         <aside class="dash-col dash-left">
-          <!-- 모바일 전용 접이식 요약 헤더 바 -->
+          <!-- 모바일 전용 분리형 요약 토글 바 -->
           <div id="mobileTodaySummaryBar" class="mobile-today-summary-bar">
-            <button type="button" id="mobileDrawerToggleBtn" class="mobile-drawer-toggle-btn" aria-expanded="false">
-              <span class="mds-dot"></span>
-              <span id="mobileDrawerSummaryText" class="mds-text">오늘 할 일 0건 · 루틴 0건</span>
-              <span id="mobileDrawerChevron" class="mds-chevron">펼치기 ▾</span>
-            </button>
+            <div class="mds-tab-group" role="group" aria-label="오늘 할 일 및 루틴 개별 열기">
+              <button type="button" id="mobileDrawerTodoTabBtn" class="mds-seg-btn" aria-expanded="false">
+                <span class="mds-dot"></span>
+                <span id="mobileDrawerTodoText" class="mds-seg-label">오늘 할 일 0건</span>
+                <span id="mobileDrawerTodoChevron" class="mds-mini-chev">▾</span>
+              </button>
+              <button type="button" id="mobileDrawerRoutineTabBtn" class="mds-seg-btn" aria-expanded="false">
+                <span id="mobileDrawerRoutineText" class="mds-seg-label">루틴 0건</span>
+                <span id="mobileDrawerRoutineChevron" class="mds-mini-chev">▾</span>
+              </button>
+            </div>
             <button type="button" id="mobileQuickAddTodoBtn" class="btn-xs btn-outline">+ 할 일</button>
           </div>
 
-          <div id="dashLeftCollapsible" class="dash-left-collapsible">
-            <!-- 오늘 미완료 루틴 미니 스트립 (모두 완료되거나 없으면 자동 숨김) -->
+          <div id="dashLeftCollapsible" class="dash-left-collapsible is-collapsed" data-mobile-drawer="none">
+            <!-- 오늘 미완료 루틴 미니 스트립 -->
             <section id="dashRoutineSection" class="panel-card compact-routine-card">
               <div class="panel-head compact-head">
                 <h2 class="panel-title">오늘 남은 루틴</h2>
@@ -228,7 +234,7 @@
             </section>
 
             <!-- 할 일 패널 -->
-            <section class="panel-card flex-grow-card">
+            <section id="dashTodoSection" class="panel-card flex-grow-card">
               <div class="panel-head compact-head">
                 <h2 class="panel-title">할 일</h2>
                 <div class="todo-head-actions">
@@ -389,9 +395,13 @@
                 <h3 id="playerCurrentStepTitle" class="current-step-name">루틴 대기 중</h3>
                 <div id="playerCountdownText" class="player-big-time">00:00</div>
                 <div id="playerOvertimeText" class="player-overtime hidden">초과 +00:00</div>
-                <p id="playerCurrentStepTip" class="current-step-tip">목록에서 시작을 누르면 타이머가 작동합니다.</p>
               </div>
             </div>
+          </div>
+
+          <div class="player-tip-banner">
+            <span class="tip-badge">팁</span>
+            <p id="playerCurrentStepTip" class="current-step-tip">목록에서 시작을 누르면 타이머가 작동합니다.</p>
           </div>
 
           <div class="player-next-preview">
@@ -461,27 +471,11 @@
                 <button type="button" class="scope-seg-btn" data-calview="week">주간</button>
                 <button type="button" class="scope-seg-btn active" data-calview="month">월간</button>
               </div>
-              <button type="button" id="calToggleProjectFilterBtn" class="btn-xs btn-ghost js-toggle-ptag-bar hidden" aria-expanded="false" title="프로젝트 태그별로 캘린더 일정을 필터링합니다">프로젝트</button>
+              <button type="button" id="calToggleProjectFilterBtn" class="btn-xs btn-ghost js-toggle-ptag-bar hidden" aria-expanded="false" title="프로젝트 태그별로 캘린더 일정을 필터링합니다">태그</button>
               <button type="button" id="toggleMilestonePanelBtn" class="btn-xs btn-outline" aria-expanded="false" title="다가오는 주요 일정과 마감 목록을 여닫습니다">
-                <span>마감 목록</span>
+                <span>마감</span>
               </button>
-              <button type="button" id="toggleCalToolsBtn" class="btn-xs btn-ghost" aria-expanded="false" title="마감 추가, 실행 기록 추가, 외부 캘린더 파일 메뉴를 여닫습니다">도구 ▾</button>
-              <button type="button" id="calAddScheduleBtn" class="btn-xs btn-primary">+ 일정</button>
-            </div>
-          </div>
-
-          <!-- 토글형 보조 작업 및 캘린더 파일 바 -->
-          <div id="calToolsDrawer" class="cal-tools-drawer hidden">
-            <div class="cal-tools-left">
-              <button type="button" id="calAddTodoBtn" class="btn-xs btn-outline">+ 마감 추가</button>
-              <button type="button" id="calAddActualBtn" class="btn-xs btn-teal">+ 실행 기록</button>
-            </div>
-            <div class="cal-tools-right">
-              <button type="button" id="calExportIcsBtn" class="btn-xs btn-ghost" title="구글·애플 캘린더 호환 파일로 내보냅니다">캘린더 내보내기</button>
-              <label for="calImportIcsInput" class="btn-xs btn-ghost file-upload-label" title="외부 캘린더 파일을 가져옵니다">
-                <span>캘린더 가져오기</span>
-                <input type="file" id="calImportIcsInput" accept=".ics,text/calendar" class="visually-hidden-file" />
-              </label>
+              <button type="button" id="calAddScheduleBtn" class="btn-xs btn-primary" title="일정, 할 일 마감, 실행 기록을 추가합니다">+ 추가</button>
             </div>
           </div>
 
@@ -506,7 +500,7 @@
               </div>
               <span class="mode-bar-divider"></span>
               <div class="mode-pill-group" id="calWeekTrackTabs">
-                <button type="button" class="mode-pill-btn active" data-weekmode="both">계획 + 실행</button>
+                <button type="button" class="mode-pill-btn active" data-weekmode="both">전체</button>
                 <button type="button" class="mode-pill-btn" data-weekmode="plan">계획</button>
                 <button type="button" class="mode-pill-btn" data-weekmode="actual">실행</button>
               </div>

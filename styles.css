@@ -7244,3 +7244,388 @@ body.is-slot-drag-creating {
   }
 }
 
+/* ==================== 5차 모바일 실화면 4대 UI 최적화 ==================== */
+
+/* ① 루틴 플레이어: 원형 타이머 내부 정돈 & 팁 외부 분리 배너 & 탭별 FAB 자동 숨김 */
+.player-circle-stage {
+  margin: 12px 0 12px;
+}
+
+.circle-center-content {
+  inset: 28px;
+  gap: 2px;
+  padding: 0 6px;
+}
+
+.current-step-name {
+  font-size: 1.12rem;
+  line-height: 1.28;
+  max-width: 94%;
+  margin: 3px 0;
+  word-break: keep-all;
+  overflow-wrap: anywhere;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+
+.current-step-name.is-long-title {
+  font-size: 0.96rem;
+  line-height: 1.25;
+}
+
+.player-tip-banner {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  background: rgba(56, 189, 248, 0.1);
+  border: 1px solid rgba(56, 189, 248, 0.24);
+  border-radius: var(--radius-md);
+  padding: 9px 13px;
+  margin-bottom: 10px;
+}
+
+.tip-badge {
+  flex-shrink: 0;
+  font-size: 0.68rem;
+  font-weight: 800;
+  color: #38BDF8;
+  background: rgba(56, 189, 248, 0.18);
+  padding: 2px 7px;
+  border-radius: 999px;
+  line-height: 1.35;
+  margin-top: 1px;
+}
+
+.player-tip-banner .current-step-tip {
+  margin: 0;
+  max-width: none;
+  flex: 1;
+  min-width: 0;
+  font-size: 0.79rem;
+  line-height: 1.42;
+  color: #E2E8F0;
+  text-align: left;
+  word-break: keep-all;
+}
+
+body[data-active-tab="routines"] .mobile-quick-fab,
+body[data-active-tab="report"] .mobile-quick-fab,
+.mobile-quick-fab.is-tab-hidden {
+  opacity: 0 !important;
+  pointer-events: none !important;
+  transform: scale(0.85) !important;
+}
+
+/* ② 오늘 할 일 내부 2중 토글: @프로젝트·개별 할 일 그룹 접기 + 연결 일정 서브토글 */
+.project-group-head.is-collapsible-head {
+  cursor: pointer;
+  user-select: none;
+  -webkit-user-select: none;
+  transition: background 0.14s ease;
+}
+
+.project-group-head.is-collapsible-head:hover {
+  background: var(--bg-subtle);
+}
+
+.project-group-block.is-group-collapsed .project-group-head {
+  border-radius: 9px;
+  border-bottom-color: transparent;
+}
+
+.pg-fold-chev {
+  font-size: 0.72rem;
+  font-weight: 800;
+  color: var(--primary);
+  flex-shrink: 0;
+  width: 12px;
+  text-align: center;
+  line-height: 1;
+}
+
+.pg-sch-subtoggle-btn {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  width: 100%;
+  padding: 6px 10px;
+  border-radius: 8px;
+  border: 1px dashed rgba(99, 102, 241, 0.36);
+  background: rgba(79, 70, 229, 0.055);
+  color: var(--primary);
+  font-size: 0.75rem;
+  font-weight: 700;
+  cursor: pointer;
+  text-align: left;
+  transition: background 0.14s ease, border-color 0.14s ease;
+}
+
+.pg-sch-subtoggle-btn:hover {
+  background: rgba(79, 70, 229, 0.1);
+  border-color: rgba(79, 70, 229, 0.55);
+}
+
+.pg-sch-subtoggle-btn.is-open {
+  background: var(--primary-soft);
+  border-style: solid;
+  border-color: rgba(79, 70, 229, 0.32);
+}
+
+[data-theme="dark"] .pg-sch-subtoggle-btn {
+  background: rgba(99, 102, 241, 0.12);
+  border-color: rgba(129, 140, 248, 0.36);
+  color: #C7D2FE;
+}
+
+[data-theme="dark"] .pg-sch-subtoggle-btn.is-open {
+  background: rgba(99, 102, 241, 0.2);
+  border-color: rgba(129, 140, 248, 0.5);
+}
+
+.pg-sch-subtoggle-label {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.pg-sch-subtoggle-chev {
+  flex-shrink: 0;
+  font-size: 0.72rem;
+  font-weight: 800;
+}
+
+/* ④ 프로젝트 태그 필터 바: 항상 1줄 유지 & 우측 접기 버튼 고정 */
+.project-tag-bar {
+  flex-wrap: nowrap;
+  gap: 8px;
+}
+
+.ptag-chip-list {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+/* 모바일·태블릿(<= 920px): 오늘 상단 요약 분리 탭 & 열린 드로어 높이 제한 */
+@media (max-width: 920px) {
+  .mobile-today-summary-bar {
+    padding: 7px 9px;
+    gap: 6px;
+  }
+
+  .mds-tab-group {
+    display: flex;
+    align-items: center;
+    gap: 5px;
+    flex: 1 1 auto;
+    min-width: 0;
+  }
+
+  .mds-seg-btn {
+    display: inline-flex;
+    align-items: center;
+    gap: 5px;
+    min-width: 0;
+    padding: 6px 10px;
+    border-radius: 9px;
+    border: 1px solid var(--border-color);
+    background: var(--bg-subtle);
+    color: var(--text-main);
+    font-size: 0.8rem;
+    font-weight: 700;
+    cursor: pointer;
+    white-space: nowrap;
+    transition: all 0.14s ease;
+  }
+
+  #mobileDrawerTodoTabBtn {
+    flex: 1.15 1 0;
+  }
+
+  #mobileDrawerRoutineTabBtn {
+    flex: 0.95 1 0;
+  }
+
+  .mds-seg-btn.active {
+    background: var(--primary);
+    border-color: var(--primary);
+    color: #FFFFFF;
+    box-shadow: 0 3px 10px rgba(79, 70, 229, 0.24);
+  }
+
+  .mds-seg-btn.active .mds-dot {
+    background: #FFFFFF;
+  }
+
+  .mds-seg-btn.active .mds-mini-chev {
+    color: #FFFFFF;
+  }
+
+  .mds-seg-btn.is-empty:not(.active) {
+    opacity: 0.65;
+  }
+
+  .mds-dot-teal {
+    background: var(--teal);
+  }
+
+  .mds-seg-label {
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  .mds-mini-chev {
+    margin-left: auto;
+    flex-shrink: 0;
+    font-size: 0.7rem;
+    font-weight: 800;
+    color: var(--primary);
+  }
+
+  [data-theme="dark"] .mds-seg-btn:not(.active) {
+    background: #1E293B;
+    border-color: #334155;
+    color: #E2E8F0;
+  }
+
+  #dashLeftCollapsible[data-mobile-drawer="todos"] #dashRoutineSection {
+    display: none !important;
+  }
+
+  #dashLeftCollapsible[data-mobile-drawer="routines"] #dashTodoSection {
+    display: none !important;
+  }
+
+  #dashLeftCollapsible #todoListContainer {
+    max-height: min(38dvh, 310px);
+    overflow-y: auto;
+    overscroll-behavior: contain;
+  }
+
+  #dashLeftCollapsible #dashRoutineList {
+    max-height: min(34dvh, 250px);
+    overflow-y: auto;
+    overscroll-behavior: contain;
+  }
+}
+
+/* 모바일(<= 768px): 최상단 앱 헤더 1줄 슬림 고정 */
+@media (max-width: 768px) {
+  .app-header {
+    flex-wrap: nowrap;
+    gap: 10px;
+    padding: calc(8px + env(safe-area-inset-top, 0px)) 14px 8px;
+  }
+
+  .brand-subtitle {
+    display: none;
+  }
+
+  .brand-area {
+    gap: 8px;
+    min-width: 0;
+  }
+
+  .brand-logo svg {
+    width: 26px;
+    height: 26px;
+  }
+
+  .brand-title {
+    font-size: 1.08rem;
+  }
+
+  .header-actions {
+    gap: 6px;
+    margin-left: auto;
+  }
+
+  .header-actions .icon-pill-btn {
+    padding: 6px 10px;
+    font-size: 0.78rem;
+  }
+}
+
+/* 소형 모바일(<= 680px): 루틴 원형 링 텍스트 여유 확보 · 캘린더 주간 바 1줄화 · 태그 바 요약 숨김 */
+@media (max-width: 680px) {
+  .player-circle-stage {
+    margin: 8px 0 10px;
+  }
+
+  .circle-svg-wrap {
+    width: min(232px, 66vw);
+    height: min(232px, 66vw);
+  }
+
+  .circle-center-content {
+    inset: 24px;
+    padding: 0 4px;
+  }
+
+  .current-step-tag {
+    font-size: 0.68rem;
+  }
+
+  .current-step-name {
+    font-size: 0.96rem;
+    line-height: 1.24;
+  }
+
+  .current-step-name.is-long-title {
+    font-size: 0.84rem;
+    line-height: 1.22;
+  }
+
+  .player-big-time {
+    font-size: 2.05rem;
+  }
+
+  .player-tip-banner {
+    padding: 8px 11px;
+    margin-bottom: 8px;
+  }
+
+  .player-tip-banner .current-step-tip {
+    font-size: 0.76rem;
+  }
+
+  #calWeekToolbar {
+    flex-wrap: nowrap;
+    align-items: center;
+    gap: 6px;
+  }
+
+  #calWeekToolbar .view-mode-left {
+    flex-shrink: 0;
+    gap: 4px;
+  }
+
+  #calWeekToolbar .mode-bar-divider {
+    display: none;
+  }
+
+  #calWeekToolbar .view-mode-right {
+    width: auto;
+    margin-left: auto;
+    justify-content: flex-end;
+    min-width: 0;
+  }
+
+  #calWeekSummaryBadges {
+    font-size: 0.72rem;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+
+  #projectTagActiveSummary {
+    display: none !important;
+  }
+}
+
+

@@ -11,6 +11,11 @@
   - Database & Keep-Alive: LocalStorage 즉시 저장 + Supabase(`public.escape_rooms` 테이블 `TIMEFLOW:<동기화코드>` 실시간 클라우드 동기화) + 3일 주기 이중 잠김 방지(Cloudflare Cron `0 0 */3 * *` + [`.github/workflows/keep-alive.yml`](file:///g:/내%20드라이브/바이브%20코딩/일정관리/.github/workflows/keep-alive.yml))
 
 ## 2. 최근 완료된 작업 내역
+- **5차 모바일 실화면 4대 UI 정밀 개선 — 루틴 원형 타이머 글자 넘침 해결 · 오늘 상단 분리 토글 & 내부 2중 토글 · 캘린더 상단 버튼 통합 · 모바일 헤더/태그 바 1줄 고정 완료 (2026-11-14)**:
+  - **`루틴` 원형 타이머 팁 외부 분리(`.player-tip-banner`) & 우측 하단 `+` FAB 탭별 자동 숨김**: 원형 링 내부에는 `현재 행동` · 단계명(`.current-step-name`, 긴 제목 `.is-long-title` 자동 축소) · 남은 시간만 남기고 행동 팁(`#playerCurrentStepTip`)을 원 아래 전용 배너로 분리해 하늘색 테두리 밖 글자 넘침을 원천 차단했으며, `루틴`·`리포트` 탭에서는 `#mobileQuickFabBtn`을 자동 숨김 처리해 하단 버튼 가림 제거
+  - **`오늘` 상단 요약 바 분리 토글(`#mobileDrawerTodoTabBtn`, `#mobileDrawerRoutineTabBtn`) & 할 일 내부 2중 토글 + 높이 제한**: 모바일 상단 드로어를 `할 일` / `루틴` 독립 토글(`mobileDrawerSection`)로 분리하고, 각 `@프로젝트`·`개별 할 일` 그룹 헤더 접기(`collapsedProjectTags`)와 그룹 내 연결 일정 기본 접힘 서브토글(`.pg-sch-subtoggle-btn`, `expandedProjectScheduleTags`), 열린 드로어 내부 스크롤 높이 제한(`max-height: min(38dvh, 310px)`)을 적용해 하단 타임라인 시야를 항상 확보
+  - **`캘린더` 상단 버튼 통합 다이어트 & 주간 요약 1줄화**: 중복되던 `도구 ▾` 버튼 및 `#calToolsDrawer`를 제거하고 `#calAddScheduleBtn`을 현재 뷰/필터 맥락에 맞춰 기본 유형이 자동 선택되는 `+ 추가`로 일원화(`[주간|월간] · 태그 · 마감 · + 추가` 1줄 배치), 모바일 `#calWeekToolbar`의 `전체 | 계획 | 실행` 탭과 주간 요약 수치도 1줄에 함께 배치
+  - **모바일 최상단 헤더(`.app-header`) & 프로젝트 태그 바(`.project-tag-bar`) 1줄 고정**: 모바일(`<= 768px`)에서 상단 중복 날짜 부제를 숨겨 로고·`검색`·`설정`을 1줄로 고정하고, 프로젝트 태그 필터 바를 `flex-wrap: nowrap`으로 고정해 가로 칩 스크롤 우측 끝에 `접기` 버튼이 항상 1줄로 유지되도록 개선
 - **4차 UI 최적화 4종(1·2·3·6번) — 타임라인 드래그 구간 생성 · 원클릭 복제 · 자정 넘김 자동 분할 · 글자/밀도 조절 완료 (2026-11-14)**:
   - **타임라인 빈 시간 구간 드래그 생성(`bindTimelineSlotDragToCreate`, `.slot-drag-range-badge`)**: `오늘` 일별 타임라인(`#dualTimelineScroll`)과 `캘린더` 주간 시간표(`#weekTimetableWrap`)에서 빈 시간 칸을 누른 채 아래·위로 드래그하면 선택한 시간 구간(`예: 14:00 ~ 17:00 · 3시간`)이 실시간 하이라이트되고, 손을 떼면 해당 시작~종료 시간이 자동 입력된 추가 모달이 즉시 열리도록 구현(단순 클릭 시 기존 1시간 추가 그대로 유지)
   - **할 일 · 일정 원클릭 복제 버튼(`#itemModalDuplicateBtn`)**: 기존 항목 편집 창 하단에 `복제` 버튼을 추가해 제목·카테고리·`@프로젝트태그`·소요 시간·중요·알람 설정을 그대로 유지한 채 새 항목 추가 모드로 즉시 전환되도록 지원
